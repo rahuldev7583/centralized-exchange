@@ -13,7 +13,72 @@ datasource db {
 }
 
 model User {
-    user_id  Int    @id @default(autoincrement())
-    username String
-    password String
+    user_id        Int      @id @default(autoincrement())
+    username       String
+    email          String?
+    password       String
+    balance        Int
+    locked_balance Int
+    created_at     DateTime @default(now())
+    updated_at     DateTime @default(now())
+    order          order?
+    fill           fill?
+}
+
+model Asset {
+    id     Int    @id @default(autoincrement())
+    name   String
+    symbol String
+
+    assetBalance Asset_balance?
+    created_at   DateTime       @default(now())
+    orders       order[]
+}
+
+model Asset_balance {
+    id             Int   @id @default(autoincrement())
+    balance        Int
+    locked_balance Int
+    asset_id       Int   @unique
+    asset          Asset @relation(fields: [asset_id], references: [id])
+
+    created_at DateTime @default(now())
+    updated_at DateTime @default(now())
+}
+
+model order {
+    id              Int    @id @default(autoincrement())
+    type            String
+    price           Int
+    quantity        Int
+    filled          Int
+    filled_quantity Int
+    status          String
+
+    asset Asset @relation(fields: [id], references: [id])
+
+    user_id Int  @unique
+    user    User @relation(fields: [user_id], references: [user_id])
+
+    created_at DateTime @default(now())
+    updated_at DateTime @default(now())
+    fill       fill?
+}
+
+model fill {
+    id          Int    @id @default(autoincrement())
+    type        String
+    price       Int
+    quantity    Int
+    status      String
+    market_type String
+
+    order_id Int   @unique
+    order    order @relation(fields: [order_id], references: [id])
+
+    user_id Int  @unique
+    user    User @relation(fields: [user_id], references: [user_id])
+
+    created_at DateTime @default(now())
+    updated_at DateTime @default(now())
 }

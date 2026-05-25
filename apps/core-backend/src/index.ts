@@ -8,13 +8,30 @@ const app = express();
 //add bcrypt, zod schema, jwt
 //endpoint need for exchange and orderbook
 //add redis client
-//create new redis db for matching engine
-//add orderbook schema
+
+//go through readme, understand flow and create diagram
+//implement redis for both core and engine
+
+//add required schema
+
 //implement create order, get depth, get user balance, get order, cancel order
+
+import { createClient } from 'redis';
+import { authMiddleware } from './middleware/auth';
+
+export const client = createClient();
+
+client.on('error', (err: any) =>
+  console.log({ msg: 'Redis client error', err }),
+);
+
+client.connect();
+console.log('Connected');
 
 app.use(express.json());
 
 app.use(authRouter);
+app.use(authMiddleware, exchangeRouter);
 
 app.get('/api/health', (req, res) => {
   console.log('health endpoints');

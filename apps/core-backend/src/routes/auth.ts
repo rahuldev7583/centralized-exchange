@@ -44,7 +44,7 @@ router.post('/api/signup', async (req, res) => {
     const token = jwt.sign(new_user, SECRET_KEY, { expiresIn: '24Hr' });
     console.log({ token });
 
-    res.json({
+    res.status(201).json({
       message: 'User created successfully',
       authToken: token,
     });
@@ -57,7 +57,7 @@ router.post('/api/signup', async (req, res) => {
   }
 });
 
-router.post('/api/login', async (req, res) => {
+router.post('/api/signin', async (req, res) => {
   const user = req.body;
   console.log({ user });
 
@@ -74,7 +74,7 @@ router.post('/api/login', async (req, res) => {
     });
 
     if (!existing_user) {
-      return res.status(404).json({ message: 'User not found' });
+      return res.status(401).json({ message: 'User not found' });
     }
 
     const pass_com = await compare(
@@ -83,7 +83,7 @@ router.post('/api/login', async (req, res) => {
     );
 
     if (!pass_com) {
-      return res.status(404).json({ message: 'Invalid password' });
+      return res.status(401).json({ message: 'Invalid password' });
     }
     if (!SECRET_KEY) {
       return res.status(404).json('SECRET_KEY not defined');
