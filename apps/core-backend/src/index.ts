@@ -30,14 +30,14 @@ console.log('Connected');
 
 app.use(express.json());
 
-app.use(authRouter);
-app.use(authMiddleware, exchangeRouter);
-
 app.get('/api/health', (req, res) => {
   console.log('health endpoints');
 
   res.json({ message: 'Server is running' });
 });
+
+app.use(authRouter);
+app.use(authMiddleware, exchangeRouter);
 
 app.listen(5000, () => {
   console.log('Server is listening on part 5000');

@@ -4,7 +4,7 @@ import { createClient } from 'redis';
 
 const router = express();
 
-const BACKEND_ID = 1;
+const BACKEND_ID = crypto.randomUUID();
 
 async function get_identifier() {
   const client = createClient();
@@ -15,7 +15,7 @@ async function get_identifier() {
 
   client.connect();
   console.log('Connected');
-  const filled = await client.brPop('filled-order', 2);
+  const filled = await client.brPop(`response-queue-${BACKEND_ID}`, 2);
 
   console.log('wait for identifier');
 
@@ -39,9 +39,9 @@ router.post('/api/order', async (req, res) => {
 
   console.log({ asset });
 
-  const req_id = (Math.random() * 1000).toFixed(0);
+  const request_id = crypto.randomUUID();
 
-  console.log({ req_id });
+  console.log({ request_id });
 
   const wallet_balance = 100000;
 
@@ -85,8 +85,13 @@ router.post('/api/order', async (req, res) => {
   const payload = { type, quantity, price, asset, user_id, side };
 
   await client.lPush(
-    'incoming_req',
-    JSON.stringify({ req_id, payload, command: 'create-order' }),
+    `incoming-request`,
+    JSON.stringify({
+      BACKEND_ID,
+      request_id,
+      payload,
+      command: 'create-order',
+    }),
   );
 
   //  wait until we got request identifier
@@ -103,18 +108,74 @@ router.post('/api/order', async (req, res) => {
   res.json({ message: 'order placed', data: parsed_res });
 });
 
-router.get('/api/order/:id', (req, res) => {
+router.get('/api/order/:order_id', async (req, res) => {
   //todo
   //  sends get-order
+
+  const order_id = req.params.order_id;
+  const request_id = crypto.randomUUID();
+
+  console.log({ order_id });
+
+  await client.lPush(
+    `incoming-request`,
+    JSON.stringify({
+      BACKEND_ID,
+      request_id,
+      payload: order_id,
+      command: 'get-order',
+    }),
+  );
+
+  //  wait until we got request identifier
+  //return filled quantity
+
+  const res_data: any = await get_identifier();
+
+  console.log({ res_data });
+
+  const parsed_res = JSON.parse(res_data?.element);
+
+  console.log({ parsed_res });
+
+  res.json({ message: 'order fetched successfully', data: parsed_res });
 });
 
 router.get('/api/order/open', (req, res) => {
   //todo
 });
 
-router.delete('/api/order/:id', (req, res) => {
+router.delete('/api/order/:order_id', async (req, res) => {
   //  todo
   //  sends cancel-order
+
+  const order_id = req.params.order_id;
+  const request_id = crypto.randomUUID();
+
+  console.log({ order_id });
+
+  await client.lPush(
+    `incoming-request`,
+    JSON.stringify({
+      BACKEND_ID,
+      request_id,
+      payload: order_id,
+      command: 'cancel-order',
+    }),
+  );
+
+  //  wait until we got request identifier
+  //return filled quantity
+
+  const res_data: any = await get_identifier();
+
+  console.log({ res_data });
+
+  const parsed_res = JSON.parse(res_data?.element);
+
+  console.log({ parsed_res });
+
+  res.json({ message: 'order cancelled', data: parsed_res });
 });
 
 router.get('/api/balance', (req, res) => {
@@ -133,6 +194,41 @@ router.get('/api/onramp', (req, res) => {
 router.get('/api/depth/:symbol', (req, res) => {
   //todo
   //sends get-depth to engine
+});
+
+router.post('/api/asset/add', async (req, res) => {
+  const asset = req.body;
+  const payload = {
+    ...asset,
+    asset_id: crypto.randomUUID(),
+  };
+  const request_id = crypto.randomUUID();
+
+  console.log({ payload });
+
+  //  check if asset already in db
+
+  await client.lPush(
+    'incoming-request',
+    JSON.stringify({
+      BACKEND_ID,
+      request_id,
+      payload,
+      command: 'create-asset',
+    }),
+  );
+
+  // create asset in db
+
+  const res_data: any = await get_identifier();
+
+  console.log({ res_data });
+
+  const parsed_res = JSON.parse(res_data?.element);
+
+  console.log({ parsed_res });
+
+  res.json({ message: 'Asset added successfully', data: parsed_res });
 });
 
 export default router;
