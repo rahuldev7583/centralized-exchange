@@ -1,19 +1,19 @@
 {
-  "name": "matching-engine",
-  "module": "index.ts",
-  "type": "module",
-  "private": true,
-  "scripts": {
-    "dev": "bun run index.ts"
-  },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
-  },
-  "dependencies": {
-    "crypto": "^1.0.1",
-    "redis": "^5.12.1"
-  }
+    "name": "matching-engine",
+    "module": "index.ts",
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "dev": "bun run index.ts"
+    },
+    "devDependencies": {
+        "@types/bun": "latest"
+    },
+    "peerDependencies": {
+        "typescript": "^5"
+    },
+    "dependencies": {
+        "crypto": "^1.0.1",
+        "redis": "^5.12.1"
+    }
 }

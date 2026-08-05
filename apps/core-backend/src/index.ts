@@ -22,7 +22,7 @@ import { authMiddleware } from './middleware/auth';
 export const client = createClient();
 
 client.on('error', (err: any) =>
-  console.log({ msg: 'Redis client error', err }),
+    console.log({ msg: 'Redis client error', err }),
 );
 
 client.connect();
@@ -31,14 +31,14 @@ console.log('Connected');
 app.use(express.json());
 
 app.get('/api/health', (req, res) => {
-  console.log('health endpoints');
+    console.log('health endpoints');
 
-  res.json({ message: 'Server is running' });
+    res.json({ message: 'Server is running' });
 });
 
 app.use(authRouter);
 app.use(authMiddleware, exchangeRouter);
 
 app.listen(5000, () => {
-  console.log('Server is listening on part 5000');
+    console.log('Server is listening on part 5000');
 });
