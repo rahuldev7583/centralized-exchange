@@ -12,12 +12,17 @@ datasource db {
     provider = "postgresql"
 }
 
+enum UserType {
+    User
+    Admin
+}
+
 model Admin {
     admin_id Int    @id @default(autoincrement())
     username String
     password String
 
-    user_type String
+    user_type UserType @default(Admin)
 
     asset  Asset[]
     market Market[]
@@ -33,8 +38,8 @@ model User {
     password String
 
     created_at DateTime        @default(now())
-    updated_at DateTime        @updatedAt
-    user_type  String
+    updated_at DateTime        @default(now())
+    user_type  UserType        @default(User)
     orders     Order[]
     asset      Asset_balance[]
 }
@@ -68,7 +73,7 @@ model Market {
     quote_asset Asset @relation("QuoteAsset", fields: [quote_asset_id], references: [id])
 
     created_at DateTime @default(now())
-    updated_at DateTime @default(now())
+    updated_at DateTime @updatedAt
 
     admin         Admin? @relation(fields: [adminAdmin_id], references: [admin_id])
     adminAdmin_id Int?
