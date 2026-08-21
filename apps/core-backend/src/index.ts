@@ -2,8 +2,13 @@ import express from 'express';
 
 import authRouter from './routes/auth';
 import exchangeRouter from './routes/exchange';
+import assetRouter from "./routes/asset";
+import walletRouter from "./routes/wallet"
+import { createClient } from 'redis';
+import { userAuthMiddleware } from './middleware/auth';
 
 const app = express();
+export const BACKEND_ID = crypto.randomUUID();
 
 //add bcrypt, zod schema, jwt
 //endpoint need for exchange and orderbook
@@ -16,8 +21,7 @@ const app = express();
 
 //implement create order, get depth, get user balance, get order, cancel order
 
-import { createClient } from 'redis';
-import { authMiddleware } from './middleware/auth';
+
 
 export const client = createClient();
 
@@ -28,6 +32,23 @@ client.on('error', (err: any) =>
 client.connect();
 console.log('Connected');
 
+export async function get_identifier() {
+    const res_client = createClient();
+
+    res_client.on('error', (err: any) =>
+        console.log({ msg: 'Redis client error', err }),
+    );
+
+    res_client.connect();
+    console.log('Connected');
+    const queue_res = await res_client.brPop(`response-queue-${BACKEND_ID}`, 2);
+
+    console.log('wait for identifier');
+
+    console.log({ queue_res });
+    return queue_res;
+}
+
 app.use(express.json());
 
 app.get('/api/health', (req, res) => {
@@ -37,7 +58,9 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use(authRouter);
-app.use(authMiddleware, exchangeRouter);
+app.use(assetRouter);
+app.use(userAuthMiddleware, walletRouter);
+app.use(userAuthMiddleware, exchangeRouter);
 
 app.listen(5000, () => {
     console.log('Server is listening on part 5000');
