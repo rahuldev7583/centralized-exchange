@@ -2,8 +2,10 @@ import express from 'express';
 import { adminAuthMiddleware } from '../middleware/auth';
 import { Asset, Market } from '../types/user';
 import { ZodError } from 'zod';
-import { prisma } from '../../lib/prisma';
-import { MarketType } from '../../generated/prisma/enums';
+//import { prisma } from '../../lib/prisma';
+import { prisma } from "database";
+//import { MarketType } from '../../generated/prisma/enums';
+import { MarketType } from 'database';
 
 const router = express();
 

@@ -1,6 +1,7 @@
 import { genSalt, hash, compare } from 'bcrypt';
 import express from 'express';
-import { prisma } from '../../lib/prisma';
+//import { prisma } from '../../lib/prisma';
+import { prisma } from "database";
 import { User } from '../types/user';
 import jwt from 'jsonwebtoken';
 import { userAuthMiddleware } from '../middleware/auth';

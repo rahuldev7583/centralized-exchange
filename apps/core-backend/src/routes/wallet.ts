@@ -1,6 +1,7 @@
 import expres from "express";
 import { ZodError } from "zod";
-import { prisma } from "../../lib/prisma";
+//import { prisma } from "../../lib/prisma";
+import { prisma } from "database";
 
 const router = expres.Router();
 

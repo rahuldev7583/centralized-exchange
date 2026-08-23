@@ -1,0 +1,145 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+    provider = "prisma-client"
+    output   = "../generated/prisma"
+}
+
+datasource db {
+    provider = "postgresql"
+}
+
+enum UserType {
+    User
+    Admin
+}
+
+enum MarketType {
+    Spot
+    Perp
+}
+
+model Admin {
+    admin_id Int    @id @default(autoincrement())
+    username String
+    password String
+
+    user_type UserType @default(Admin)
+
+    asset  Asset[]
+    market Market[]
+
+    created_at DateTime @default(now())
+    updated_at DateTime @updatedAt
+}
+
+model User {
+    user_id  Int     @id @default(autoincrement())
+    username String
+    email    String?
+    password String
+
+    created_at DateTime        @default(now())
+    updated_at DateTime        @default(now())
+    user_type  UserType        @default(User)
+    orders     Order[]
+    asset      Asset_balance[]
+}
+
+model Asset {
+    id       Int    @id @default(autoincrement())
+    name     String
+    symbol   String @unique
+    decimals Int
+
+    created_at DateTime @default(now())
+    updated_at DateTime @updatedAt
+
+    admin         Admin? @relation(fields: [adminAdmin_id], references: [admin_id])
+    adminAdmin_id Int?
+
+    base_markets      Market[]        @relation("BaseAsset")
+    quote_markets     Market[]        @relation("QuoteAsset")
+    assetBalances     Asset_balance[]
+    last_traded_price Int             @default(0)
+}
+
+model Market {
+    id     Int    @id @default(autoincrement())
+    name   String
+    symbol String @unique
+
+    base_asset_id  Int
+    quote_asset_id Int
+
+    base_asset  Asset @relation("BaseAsset", fields: [base_asset_id], references: [id])
+    quote_asset Asset @relation("QuoteAsset", fields: [quote_asset_id], references: [id])
+
+    created_at DateTime @default(now())
+    updated_at DateTime @updatedAt
+
+    admin         Admin? @relation(fields: [adminAdmin_id], references: [admin_id])
+    adminAdmin_id Int?
+
+    orders Order[]
+
+    type MarketType
+}
+
+model Asset_balance {
+    id             Int @id @default(autoincrement())
+    balance        Int
+    locked_balance Int
+
+    asset Asset @relation(fields: [assetId], references: [id])
+
+    created_at DateTime @default(now())
+    updated_at DateTime @updatedAt
+
+    assetId Int
+    user    User @relation(fields: [user_id], references: [user_id])
+    user_id Int
+
+    @@unique([user_id, assetId])
+}
+
+model Order {
+    id       Int    @id @default(autoincrement())
+    type     String
+    price    Int
+    quantity Int
+    filled   Int
+    status   String
+    side     String
+
+    created_at DateTime @default(now())
+    updated_at DateTime @updatedAt
+
+    market      Market @relation(fields: [marketId], references: [id])
+    user        User   @relation(fields: [userUser_id], references: [user_id])
+    marketId    Int
+    userUser_id Int
+
+    ask_fill Fill[] @relation("AskOrder")
+    bid_fill Fill[] @relation("BidOrder")
+}
+
+model Fill {
+    id       Int    @id @default(autoincrement())
+    type     String
+    price    Int
+    quantity Int
+    status   String
+
+    ask_order_id Order @relation("AskOrder", fields: [ask_orderId], references: [id])
+    bid_order_id Order @relation("BidOrder", fields: [bid_orderId], references: [id])
+
+    created_at DateTime @default(now())
+    updated_at DateTime @updatedAt
+
+    ask_orderId Int
+    bid_orderId Int
+}
