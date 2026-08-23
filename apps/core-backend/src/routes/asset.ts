@@ -123,28 +123,6 @@ router.post('/api/exchange/market/add', adminAuthMiddleware, async (req, res) =>
         const parsedMarket = Market.parse(market_req);
         console.log({ parsedMarket });
 
-        const existing_market = await prisma.market.findFirst({
-            where: {
-                OR: [
-                    {
-                        symbol: parsedMarket.symbol,
-                    },
-                    {
-                        name: parsedMarket.name
-                    }
-                ]
-            },
-        });
-
-        if (existing_market) {
-            return res.status(404).json({ message: 'Market already exists' });
-        }
-
-        const admin = req.user;
-        console.log({ admin });
-
-        const type: MarketType = parsedMarket.type.toLowerCase() == "spot" ? "Spot" : "Perp"
-
         const base_ast = await prisma.asset.findFirst({
             where: {
                 symbol: parsedMarket.base_asset_symbol
@@ -159,11 +137,24 @@ router.post('/api/exchange/market/add', adminAuthMiddleware, async (req, res) =>
             }
         });
 
-        console.log({ quote_ast });
 
         if (!base_ast || !quote_ast) {
             return res.status(404).json({ message: 'Base Asset or Quote Asset not valid' });
         }
+        const existing_market = await prisma.market.findFirst({
+            where: {
+                base_asset_id: base_ast?.id,
+                quote_asset_id: quote_ast?.id
+            },
+        });
+
+        if (existing_market) {
+            return res.status(404).json({ message: 'Market already exists' });
+        }
+
+        const admin = req.user;
+
+        const type: MarketType = parsedMarket.type.toLowerCase() == "spot" ? "Spot" : "Perp"
 
         const new_market = await prisma.market.create({
             data: {
@@ -171,7 +162,8 @@ router.post('/api/exchange/market/add', adminAuthMiddleware, async (req, res) =>
                 symbol: parsedMarket.symbol,
                 type: type,
                 quote_asset_id: quote_ast?.id,
-                base_asset_id: base_ast?.id
+                base_asset_id: base_ast?.id,
+                adminAdmin_id: admin
             },
         });
         return res.status(201).json({
