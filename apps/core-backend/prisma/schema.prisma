@@ -61,9 +61,10 @@ model Asset {
     admin         Admin? @relation(fields: [adminAdmin_id], references: [admin_id])
     adminAdmin_id Int?
 
-    base_markets  Market[]        @relation("BaseAsset")
-    quote_markets Market[]        @relation("QuoteAsset")
-    assetBalances Asset_balance[]
+    base_markets      Market[]        @relation("BaseAsset")
+    quote_markets     Market[]        @relation("QuoteAsset")
+    assetBalances     Asset_balance[]
+    last_traded_price Int             @default(0)
 }
 
 model Market {
