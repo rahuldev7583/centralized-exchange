@@ -39,47 +39,94 @@ router.post('/api/wallet/onramp', async (req, res) => {
             return res.status(404).json({ message: "Currency not supported" })
         }
 
-        if (assets.length == 0) {
-            const all_ast = await prisma.asset.findMany();
-            console.log({ all_ast });
+        //if (assets.length == 0) {
+        const all_ast = await prisma.asset.findMany();
+        console.log({ all_ast });
 
-            for (let i = 0; i < all_ast.length; i++) {
-                if (all_ast[i].symbol == currency.toUpperCase()) {
-                    await prisma.asset_balance.create({
-                        data: {
-                            balance: amount,
-                            locked_balance: 0,
-                            assetId: primary_ast?.id,
-                            user_id: user_id
+        for (let i = 0; i < all_ast.length; i++) {
+            if (all_ast[i].symbol == currency.toUpperCase()) {
+
+                //await prisma.asset_balance.create({
+                //    data: {
+                //        balance: amount * all_ast[i].decimals,
+                //        locked_balance: 0,
+                //        assetId: primary_ast?.id,
+                //        user_id: user_id
+                //    }
+                //});
+
+                await prisma.asset_balance.upsert({
+                    where: {
+                        user_id_assetId: {
+                            user_id: user_id,
+                            assetId: primary_ast.id
                         }
-                    });
-                } else {
-                    await prisma.asset_balance.create({
-                        data: {
-                            balance: 0,
-                            locked_balance: 0,
-                            assetId: all_ast[i].id,
-                            user_id: user_id
+                    },
+                    create: {
+                        balance: amount * all_ast[i].decimals,
+                        locked_balance: 0,
+                        assetId: primary_ast?.id,
+                        user_id: user_id
+                    },
+                    update: {
+                        balance: {
+                            increment: amount * all_ast[i].decimals
                         }
-                    });
-                }
+                    }
+                })
+
+            } else {
+                //await prisma.asset_balance.create({
+                //    data: {
+                //        balance: 0,
+                //        locked_balance: 0,
+                //        assetId: all_ast[i].id,
+                //        user_id: user_id
+                //    }
+                //});
+
+                await prisma.asset_balance.upsert({
+                    where: {
+                        user_id_assetId: {
+                            user_id: user_id,
+                            assetId: all_ast[i].id
+                        }
+                    },
+                    create: {
+                        balance: 0,
+                        locked_balance: 0,
+                        assetId: all_ast[i].id,
+                        user_id: user_id
+                    },
+
+                    update: {
+                        balance: {
+                            increment: 0
+                        },
+                        locked_balance: {
+                            increment: 0
+                        }
+                    }
+                })
             }
-
-        } else {
-            await prisma.asset_balance.update({
-                where: {
-                    user_id_assetId: {
-                        user_id: user_id,
-                        assetId: primary_ast.id
-                    }
-                },
-                data: {
-                    balance: {
-                        increment: amount
-                    }
-                }
-            });
         }
+
+        //}
+        //else {
+        //    await prisma.asset_balance.update({
+        //        where: {
+        //            user_id_assetId: {
+        //                user_id: user_id,
+        //                assetId: primary_ast.id
+        //            }
+        //        },
+        //        data: {
+        //            balance: {
+        //                increment: amount
+        //            }
+        //        }
+        //    });
+        //}
         res.json({ message: "Wallet funded successfully", currency, amount })
 
     } catch (error) {

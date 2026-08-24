@@ -1,5 +1,9 @@
 import { createClient } from 'redis';
-import { ASSETS, FILLS, ORDERBOOK, type Order } from './store';
+import { ASSETS, FILLS, ORDERBOOK, type OpenOrder, type Order, type Orderbook } from './store';
+import { prisma } from "database";
+
+export type engineStatus = | 'pending' | 'ready' | 'down';
+export type requestStatus = | 'order accepted' | 'order rejected' | 'order pending' | 'order cancelled';
 
 export type engineCommand =
     | 'create_order'
@@ -17,10 +21,10 @@ export interface engineRequest {
 }
 
 export interface engineResponse {
-    backend_id: string;
     request_id: string;
-    status: boolean;
-    data: any;
+    status: requestStatus;
+    message: string,
+    data?: any;
 }
 const client = createClient();
 
@@ -44,7 +48,7 @@ console.log('Connected');
 //const ORDERBOOK: any = {
 //  BTC: {
 //    bids: [],
-//    asks: [],
+//    asks: [], 
 //  },
 //  ETH: {
 //    bids: [],
@@ -60,17 +64,18 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
     console.log({ payload });
     console.log({ ORDERBOOK });
 
-    const asset = ORDERBOOK.get(payload.asset);
-    console.log({ asset });
+    const market = ORDERBOOK.get(payload.symbol);
+    console.log({ market });
 
-    if (!asset) {
-        console.log('asset not available on orderbook');
+    if (!market) {
+        console.log('Market not available on orderbook');
 
-        //error asset not available on orderbook
+        //error market not available on orderbook
 
-        const res_data = {
+        const res_data: engineResponse = {
             request_id,
-            message: 'Asset not available on orderbook',
+            status: 'order rejected',
+            message: 'Market not available on orderbook',
         };
 
         publishclient.lPush(
@@ -92,18 +97,18 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
         //i have to track last best price and quantity
 
         if (payload.side === 'buy') {
-            console.log({ asset });
+            console.log({ market });
 
             let lowest_price = 0;
             let lowest_order: string = '';
 
-            if (asset.asks.size > 0) {
-                for (const [key, value] of asset.asks.entries()) {
+            if (market.asks.size > 0) {
+                for (const [key, value] of market.asks.entries()) {
                     console.log({ key, value });
-                    if (lowest_price === 0) {
+                    if (lowest_price === 0 && value.user_id !== payload.user_id) {
                         lowest_price = value.price;
                         lowest_order = key;
-                    } else if (value.price <= lowest_price) {
+                    } else if (value.price <= lowest_price && value.user_id !== payload.user_id) {
                         lowest_price = value.price;
                         lowest_order = key;
                     }
@@ -119,7 +124,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
             //  what if sort the order by price then loop through it, until got filled
 
-            asset.asks.forEach((k, v) => {
+            market.asks.forEach((k, v) => {
                 console.log({ k, v });
 
                 //order will partially or fully filled based on quantity
@@ -128,7 +133,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                 console.log({ lowest_price });
 
-                if (k.price <= lowest_price) {
+                if (k.price <= lowest_price && k.user_id !== payload.user_id) {
                     //do the matching
                     lowest_price = k.price;
                     lowest_order = v;
@@ -152,12 +157,12 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 'current order quantity more than the fill required. so decrease this order quantity',
                             );
 
-                            const current_ast: any = asset.asks.get(v);
+                            const current_ast: any = market.asks.get(v);
                             console.log({ current_ast });
 
                             filled_quantity += payload.quantity - filled_quantity;
 
-                            asset.asks.set(v, {
+                            market.asks.set(v, {
                                 ...k,
                                 quantity: k.quantity - (payload.quantity - filled_quantity),
                             });
@@ -168,14 +173,14 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 'current order quantity less than or equal to the fill required. so delete this order quantity',
                             );
 
-                            const current_ast: any = asset.asks.get(v);
+                            const current_ast: any = market.asks.get(v);
                             console.log({ current_ast });
 
                             filled_quantity += current_ast.quantity;
 
                             console.log({ filled_quantityAT_161: filled_quantity });
 
-                            asset.asks.delete(v);
+                            market.asks.delete(v);
                         }
                     }
                 } else {
@@ -185,16 +190,16 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                     let second_lowest_price = 0;
                     let second_lowest_id = '';
 
-                    if (asset.asks.size > 0) {
-                        for (const [key, value] of asset.asks.entries()) {
+                    if (market.asks.size > 0) {
+                        for (const [key, value] of market.asks.entries()) {
                             console.log({ key, value });
 
-                            if (second_lowest_price === 0) {
+                            if (second_lowest_price === 0 && value.user_id !== payload.user_id) {
                                 second_lowest_price = value.price;
                                 second_lowest_id = key;
                             } else if (
                                 value.price <= second_lowest_price &&
-                                value.price > lowest_price
+                                value.price > lowest_price && value.user_id !== payload.user_id
                             ) {
                                 second_lowest_price = value.price;
                                 second_lowest_id = key;
@@ -217,10 +222,14 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
             console.log('outside loop');
 
-            const res_data = {
+            const res_data: engineResponse = {
                 request_id,
-                price: payload.price,
-                filled_quantity: filled_quantity,
+                data: {
+                    price: payload.price,
+                    filled_quantity: filled_quantity
+                },
+                status: 'order accepted',
+                message: ''
             };
             console.log({ finalOrderbook: ORDERBOOK });
 
@@ -230,18 +239,18 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
             );
             return;
         } else if (payload.side === 'sell') {
-            console.log({ asset });
+            console.log({ market });
 
             let highest_price = 0;
             let highest_order: string = '';
 
-            if (asset.bids.size > 0) {
-                for (const [key, value] of asset.bids.entries()) {
+            if (market.bids.size > 0) {
+                for (const [key, value] of market.bids.entries()) {
                     console.log({ key, value });
-                    if (highest_price === 0) {
+                    if (highest_price === 0 && value.user_id !== payload.user_id) {
                         highest_price = value.price;
                         highest_order = key;
-                    } else if (value.price >= highest_price) {
+                    } else if (value.price >= highest_price && value.user_id !== payload.user_id) {
                         highest_price = value.price;
                         highest_order = key;
                     }
@@ -257,7 +266,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
             //  what if sort the order by price then loop through it, until got filled
 
-            asset.bids.forEach((k, v) => {
+            market.bids.forEach((k, v) => {
                 console.log({ k, v });
 
                 //order will partially or fully filled based on quantity
@@ -266,7 +275,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                 console.log({ highest_price });
 
-                if (k.price >= highest_price) {
+                if (k.price >= highest_price && k.user_id !== payload.user_id) {
                     //do the matching
                     highest_price = k.price;
                     highest_order = v;
@@ -290,12 +299,12 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 'current order quantity more than the fill required. so decrease this order quantity',
                             );
 
-                            const current_ast: any = asset.bids.get(v);
+                            const current_ast: any = market.bids.get(v);
                             console.log({ current_ast });
 
                             filled_quantity += payload.quantity - filled_quantity;
 
-                            asset.asks.set(v, {
+                            market.asks.set(v, {
                                 ...k,
                                 quantity: k.quantity - (payload.quantity - filled_quantity),
                             });
@@ -306,14 +315,14 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 'current order quantity less than or equal to the fill required. so delete this order quantity',
                             );
 
-                            const current_ast: any = asset.bids.get(v);
+                            const current_ast: any = market.bids.get(v);
                             console.log({ current_ast });
 
                             filled_quantity += current_ast.quantity;
 
                             console.log({ filled_quantityAT_161: filled_quantity });
 
-                            asset.asks.delete(v);
+                            market.asks.delete(v);
                         }
                     }
                 } else {
@@ -323,16 +332,16 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                     let second_highest_price = 0;
                     let second_highest_id = '';
 
-                    if (asset.bids.size > 0) {
-                        for (const [key, value] of asset.bids.entries()) {
+                    if (market.bids.size > 0) {
+                        for (const [key, value] of market.bids.entries()) {
                             console.log({ key, value });
 
-                            if (second_highest_price === 0) {
+                            if (second_highest_price === 0 && value.user_id !== payload.user_id) {
                                 second_highest_price = value.price;
                                 second_highest_id = key;
                             } else if (
                                 value.price >= second_highest_price &&
-                                value.price < highest_price
+                                value.price < highest_price && value.user_id !== payload.user_id
                             ) {
                                 second_highest_price = value.price;
                                 second_highest_id = key;
@@ -355,10 +364,14 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
             console.log('outside loop');
 
-            const res_data = {
+            const res_data: engineResponse = {
                 request_id,
-                price: payload.price,
-                filled_quantity: filled_quantity,
+                data: {
+                    price: payload.price,
+                    filled_quantity: filled_quantity
+                },
+                status: 'order accepted',
+                message: ''
             };
             console.log({ finalOrderbook: ORDERBOOK });
 
@@ -371,17 +384,17 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
     } else {
         if (payload.side == 'buy') {
             //fill order, decrease user wallet balance , increase that asset , decrease that asset quantity from orderbook
-            console.log({ asset });
+            console.log({ market });
             let lowest_price = 0;
             let lowest_order: string = '';
 
-            if (asset.asks.size > 0) {
-                for (const [key, value] of asset.asks.entries()) {
+            if (market.asks.size > 0) {
+                for (const [key, value] of market.asks.entries()) {
                     console.log({ key, value });
-                    if (lowest_price === 0) {
+                    if (lowest_price === 0 && value.user_id !== payload.user_id) {
                         lowest_price = value.price;
                         lowest_order = key;
-                    } else if (value.price <= lowest_price) {
+                    } else if (value.price <= lowest_price && value.user_id !== payload.user_id) {
                         lowest_price = value.price;
                         lowest_order = key;
                     }
@@ -394,8 +407,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
             //  if there is no asks then no need to compare
 
             if (
-                asset.asks.size == 0 ||
-                (asset.asks.size > 0 && payload.price < lowest_price)
+                market.asks.size == 0 ||
+                (market.asks.size > 0 && payload.price < lowest_price)
             ) {
                 console.log('push to orderbook');
 
@@ -417,7 +430,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                 //console.log({ set_asset });
 
-                asset.bids.set(order_id, {
+                market.bids.set(order_id, {
                     order_id,
 
                     side: payload.side,
@@ -428,20 +441,24 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                     type: payload.type,
 
-                    asset: payload.asset,
+                    symbol: payload.symbol,
 
                     created_at: Date.now(),
                 });
                 console.log({ updatedOrderbook: ORDERBOOK });
 
-                console.log({ bids: asset.bids });
+                console.log({ bids: market.bids });
 
-                const res_data = {
-                    order_id,
+                const res_data: engineResponse = {
                     request_id,
-                    price: payload.price,
-                    filled_quantity: 0,
-                    fills: [],
+                    data: {
+                        order_id,
+                        price: payload.price,
+                        filled_quantity: 0,
+                        fills: [],
+                    },
+                    status: 'order accepted',
+                    message: ''
                 };
 
                 publishclient.lPush(
@@ -465,14 +482,14 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                 let total_quantity = 0;
                 let matching_orders: any = [];
 
-                asset.asks.forEach((k, v) => {
+                market.asks.forEach((k, v) => {
                     console.log({ k, v });
 
                     //order will partially or fully filled based on quantity
 
                     //  get the the all the order matching at this price, calculate total quantity until either order got fully filled or no other asset available at this price or lower
 
-                    if (k.price <= payload.price) {
+                    if (k.price <= payload.price && k.user_id !== payload.user_id) {
                         if (payload.quantity > total_quantity) {
                             total_quantity += k.quantity;
                             console.log({ total_quantity, quan: k.quantity });
@@ -493,9 +510,9 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                     for (let i = 0; i < matching_orders.length; i++) {
                         console.log(`Remove this order from asks: ${matching_orders[i]}`);
-                        console.log({ currentORD: asset.asks.get(matching_orders[i]) });
+                        console.log({ currentORD: market.asks.get(matching_orders[i]) });
 
-                        const current_ast: any = asset.asks.get(matching_orders[i]);
+                        const current_ast: any = market.asks.get(matching_orders[i]);
                         console.log({ current_ast });
 
                         if (current_ast.quantity > payload.quantity - filled_quantity) {
@@ -505,7 +522,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             //decrease the order quantity, increase the fill
 
-                            asset.asks.set(matching_orders[i], {
+                            market.asks.set(matching_orders[i], {
                                 ...current_ast,
                                 quantity:
                                     current_ast.quantity - (payload.quantity - filled_quantity),
@@ -517,7 +534,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 side: 'buy',
                                 quantity: 0,
                                 price: 0,
-                                asset: '',
+                                symbol: '',
                                 buy_order_id: '',
                                 sell_order_id: '',
                                 fill_id: '',
@@ -547,19 +564,23 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                             //    created_at: 0,
                             //  });
 
-                            asset.asks.delete(matching_orders[i]);
+                            market.asks.delete(matching_orders[i]);
                         }
                     }
 
-                    console.log({ asks: asset.asks });
+                    console.log({ asks: market.asks });
 
                     console.log({ filled_quantity });
 
-                    const res_data = {
+                    const res_data: engineResponse = {
                         request_id,
-                        price: payload.price,
-                        filled_quantity: filled_quantity,
-                        fills: FILLS,
+                        data: {
+                            price: payload.price,
+                            filled_quantity: filled_quantity,
+                            fills: FILLS,
+                        },
+                        status: 'order accepted',
+                        message: ''
                     };
                     console.log({ finalOrderbook: ORDERBOOK });
 
@@ -573,14 +594,18 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                     let filled_orders = [];
                     let filled_quantity = 0;
 
-                    console.log({ asks: asset.asks });
+                    console.log({ asks: market.asks });
 
                     console.log({ filled_quantity });
 
-                    const res_data = {
+                    const res_data: engineResponse = {
                         request_id,
-                        price: payload.price,
-                        filled_quantity: filled_quantity,
+                        data: {
+                            price: payload.price,
+                            filled_quantity: filled_quantity,
+                        },
+                        status: 'order accepted',
+                        message: ''
                     };
                     console.log({ finalOrderbook: ORDERBOOK });
 
@@ -599,13 +624,13 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
             let highest_price = 0;
             let highest_order: string = '';
 
-            if (asset.bids.size > 0) {
-                for (const [key, value] of asset.bids.entries()) {
+            if (market.bids.size > 0) {
+                for (const [key, value] of market.bids.entries()) {
                     console.log({ key, value });
-                    if (highest_price === 0) {
+                    if (highest_price === 0 && value.user_id !== payload.user_id) {
                         highest_price = value.price;
                         highest_order = key;
-                    } else if (value.price <= highest_price) {
+                    } else if (value.price <= highest_price && value.user_id !== payload.user_id) {
                         highest_price = value.price;
                         highest_order = key;
                     }
@@ -616,17 +641,17 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
             console.log({ highest_price });
 
             if (
-                asset.bids.size == 0 ||
-                (asset.bids.size > 0 && payload.price > highest_price)
+                market.bids.size == 0 ||
+                (market.bids.size > 0 && payload.price > highest_price)
             ) {
                 console.log('push to orderbook');
 
                 const order_id: string = crypto.randomUUID();
 
                 console.log({ ORDERBOOK });
-                console.log({ bids: asset.bids });
+                console.log({ bids: market.bids });
 
-                asset.asks.set(order_id, {
+                market.asks.set(order_id, {
                     order_id,
                     side: payload.side,
                     price: payload.price,
@@ -634,17 +659,21 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                     user_id: payload.user_id,
                     request_id,
                     type: payload.type,
-                    asset: payload.asset,
+                    symbol: payload.symbol,
                     created_at: Date.now(),
                 });
 
-                console.log({ bids: asset.bids });
+                console.log({ bids: market.bids });
 
-                const res_data = {
-                    order_id,
+                const res_data: engineResponse = {
                     request_id,
-                    price: payload.price,
-                    filled_quantity: 0,
+                    data: {
+                        order_id,
+                        price: payload.price,
+                        filled_quantity: 0,
+                    },
+                    status: 'order accepted',
+                    message: ''
                 };
 
                 publishclient.lPush(
@@ -661,14 +690,14 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                 let total_quantity = 0;
                 let matching_orders: any = [];
 
-                asset.bids.forEach((k, v) => {
+                market.bids.forEach((k, v) => {
                     console.log({ k, v });
 
                     //order will partially or fully filled based on quantity
 
                     //  get the the all the order matching at this price, calculate total quantity until either order got fully filled or no other asset available at this price or higher
 
-                    if (k.price >= payload.price) {
+                    if (k.price >= payload.price && k.user_id != payload.user_id) {
                         if (payload.quantity > total_quantity) {
                             total_quantity += k.quantity;
                             console.log({ total_quantity, quan: k.quantity });
@@ -688,9 +717,9 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                     for (let i = 0; i < matching_orders.length; i++) {
                         console.log(`Remove this order from asks: ${matching_orders[i]}`);
-                        console.log({ currentORD: asset.bids.get(matching_orders[i]) });
+                        console.log({ currentORD: market.bids.get(matching_orders[i]) });
 
-                        const current_ast: any = asset.bids.get(matching_orders[i]);
+                        const current_ast: any = market.bids.get(matching_orders[i]);
                         console.log({ current_ast });
 
                         if (current_ast.quantity > payload.quantity - filled_quantity) {
@@ -700,7 +729,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             //decrease the order quantity, increase the fill
 
-                            asset.bids.set(matching_orders[i], {
+                            market.bids.set(matching_orders[i], {
                                 ...current_ast,
                                 quantity:
                                     current_ast.quantity - (payload.quantity - filled_quantity),
@@ -718,18 +747,22 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             filled_quantity += current_ast.quantity;
 
-                            asset.bids.delete(matching_orders[i]);
+                            market.bids.delete(matching_orders[i]);
                         }
                     }
 
-                    console.log({ bids: asset.bids });
+                    console.log({ bids: market.bids });
 
                     console.log({ filled_quantity });
 
-                    const res_data = {
+                    const res_data: engineResponse = {
                         request_id,
-                        price: payload.price,
-                        filled_quantity: filled_quantity,
+                        data: {
+                            price: payload.price,
+                            filled_quantity: filled_quantity,
+                        },
+                        status: 'order accepted',
+                        message: ''
                     };
                     console.log({ finalOrderbook: ORDERBOOK });
 
@@ -747,9 +780,9 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                     for (let i = 0; i < matching_orders.length; i++) {
                         console.log(`Remove this order from asks: ${matching_orders[i]}`);
-                        console.log({ currentORD: asset.asks.get(matching_orders[i]) });
+                        console.log({ currentORD: market.asks.get(matching_orders[i]) });
 
-                        const current_ast: any = asset.bids.get(matching_orders[i]);
+                        const current_ast: any = market.bids.get(matching_orders[i]);
                         console.log({ current_ast });
 
                         if (current_ast.quantity > payload.quantity - filled_quantity) {
@@ -759,7 +792,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             //decrease the order quantity, increase the fill
 
-                            asset.bids.set(matching_orders[i], {
+                            market.bids.set(matching_orders[i], {
                                 ...current_ast,
                                 quantity:
                                     current_ast.quantity - (payload.quantity - filled_quantity),
@@ -777,17 +810,21 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             filled_quantity += current_ast.quantity;
 
-                            asset.bids.delete(matching_orders[i]);
+                            market.bids.delete(matching_orders[i]);
                         }
                     }
-                    console.log({ bids: asset.bids });
+                    console.log({ bids: market.bids });
 
                     console.log({ filled_quantity });
 
-                    const res_data = {
+                    const res_data: engineResponse = {
                         request_id,
-                        price: payload.price,
-                        filled_quantity: filled_quantity,
+                        data: {
+                            price: payload.price,
+                            filled_quantity: filled_quantity,
+                        },
+                        status: 'order accepted',
+                        message: ''
                     };
                     console.log({ finalOrderbook: ORDERBOOK });
 
@@ -840,10 +877,14 @@ const cancel_order = (payload: any, backend_id: string, request_id: string) => {
     console.log({ ORDERBOOK });
     console.log('order cancelled');
 
-    const res_data = {
+    const res_data: engineResponse = {
         request_id,
-        price: payload.price,
-        order,
+        data: {
+            price: payload.price,
+            order,
+        },
+        status: 'order cancelled',
+        message: ''
     };
 
     publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
@@ -874,10 +915,14 @@ const get_order = (payload: any, backend_id: string, request_id: string) => {
 
     console.log({ order });
 
-    const res_data = {
+    const res_data: engineResponse = {
         request_id,
-        price: payload.price,
-        order,
+        data: {
+            price: payload.price,
+            order,
+        },
+        status: 'order pending',
+        message: ''
     };
 
     publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
@@ -937,18 +982,70 @@ const create_asset = (payload: any, backend_id: string, request_id: string) => {
     publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
 };
 
+let engine_status: engineStatus = 'down'
+
 while (1) {
+
+    if (engine_status == 'down') {
+        engine_status = 'pending'
+    }
+    //get the asset and markets from db, last snapshot from s3 and construct orderbook
+
+    //matching engine will not accept order until it create and all markets spot and perps for all asset pairs
+
+    if (engine_status != 'ready') {
+
+        const markets = await prisma.market.findMany();
+
+        console.log({ markets });
+        if (!markets) {
+            //error market not intitialized
+
+        }
+
+        for (let i = 0; i < markets.length; i++) {
+
+            ORDERBOOK.set(markets[i]?.symbol || 'Undefined', {
+                asks: new Map(),
+                bids: new Map()
+            })
+        }
+
+        engine_status = 'ready'
+    }
+
     const incoming_req = await client.brPop('incoming-request', 2);
 
     //  const res = await client.brPop('create-order', 2);
 
     console.log({ incoming_req });
 
+    console.log({ ORDERBOOK });
+
+    //console.log({ engine_status });
+
+    console.log({ engine_status });
+
+
     if (!incoming_req) {
         continue;
     }
     const parsed_req = JSON.parse(incoming_req.element);
     console.log({ parsed_req });
+
+
+    if (engine_status != 'ready') {
+        const res_data: engineResponse = {
+            request_id: parsed_req.request_id,
+            status: 'order rejected',
+            message: 'Matching engine is not ready to accept orders',
+        };
+
+        publishclient.lPush(
+            `response-queue-${parsed_req.BACKEND_ID}`,
+            JSON.stringify(res_data),
+        );
+    }
 
     //  do matching engine, check command type, do matching engine stuff and return price and identifier
 

@@ -4,7 +4,8 @@
     "type": "module",
     "private": true,
     "scripts": {
-        "dev": "bun run index.ts"
+        "dev": "bun run index.ts",
+        "watch": "bun --watch index.ts"
     },
     "devDependencies": {
         "@types/bun": "latest"
@@ -14,6 +15,7 @@
     },
     "dependencies": {
         "crypto": "^1.0.1",
-        "redis": "^5.12.1"
+        "redis": "^5.12.1",
+        "database": "workspace:*"
     }
 }

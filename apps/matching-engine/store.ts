@@ -18,7 +18,7 @@ export interface OpenOrder {
     side: side;
     quantity: number;
     price: number;
-    asset: string;
+    symbol: string;
     user_id: string;
     order_id: string;
     request_id: string;
@@ -30,7 +30,7 @@ export interface Fill {
     side: side;
     quantity: number;
     price: number;
-    asset: string;
+    symbol: string;
 
     buy_order_id: string;
     sell_order_id: string;
@@ -43,7 +43,7 @@ export interface Order {
     side: side;
     quantity: number;
     price: number;
-    asset: string;
+    symbol: string;
     user_id: string;
     order_id: string;
     request_id: string;
@@ -51,11 +51,6 @@ export interface Order {
     created_at: number;
 }
 
-export interface Asset {
-    asset_id: string;
-    name: string;
-    symbol: string;
-}
 
 export interface Orderbook {
     bids: Map<string, OpenOrder>;
