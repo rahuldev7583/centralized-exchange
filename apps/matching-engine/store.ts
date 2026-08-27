@@ -27,10 +27,12 @@ export interface OpenOrder {
 
 export interface Fill {
     type: type;
-    side: side;
     quantity: number;
+    filled_quantity: number;
     price: number;
     symbol: string;
+    buy_user_id: string,
+    sell_user_Id: string,
 
     buy_order_id: string;
     sell_order_id: string;

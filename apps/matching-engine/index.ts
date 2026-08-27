@@ -1,5 +1,5 @@
 import { createClient } from 'redis';
-import { ASSETS, FILLS, ORDERBOOK, type OpenOrder, type Order, type Orderbook } from './store';
+import { ASSETS, FILLS, ORDERBOOK, type Fill, type OpenOrder, type Order, type Orderbook } from './store';
 import { prisma } from "database";
 
 export type engineStatus = | 'pending' | 'ready' | 'down';
@@ -22,9 +22,12 @@ export interface engineRequest {
 
 export interface engineResponse {
     request_id: string;
+    order_id: string
     status: requestStatus;
     message: string,
-    data?: any;
+    price: number,
+    filled_quantity: number,
+    data?: any
 }
 const client = createClient();
 
@@ -43,7 +46,17 @@ publishclient.on('error', (err: any) =>
 
 publishclient.connect();
 
-console.log('Connected');
+console.log('publish Connected');
+
+const dbWorkerclient = createClient();
+
+dbWorkerclient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+
+dbWorkerclient.connect();
+
+console.log('dbWorkerclient Connected');
 
 //const ORDERBOOK: any = {
 //  BTC: {
@@ -63,6 +76,7 @@ console.log('Connected');
 const create_order = (payload: any, backend_id: string, request_id: string) => {
     console.log({ payload });
     console.log({ ORDERBOOK });
+    const order_id: string = crypto.randomUUID();
 
     const market = ORDERBOOK.get(payload.symbol);
     console.log({ market });
@@ -74,8 +88,11 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
         const res_data: engineResponse = {
             request_id,
+            order_id,
             status: 'order rejected',
             message: 'Market not available on orderbook',
+            price: payload.price,
+            filled_quantity: 0
         };
 
         publishclient.lPush(
@@ -88,6 +105,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
     //for buy => lowest available price on orderbook
     //for sell => highest available price on orderbook
+
+
 
     if (payload.type == 'market') {
         //execute immediately
@@ -162,10 +181,43 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             filled_quantity += payload.quantity - filled_quantity;
 
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: payload.quantity - filled_quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: payload.user_id,
+                                sell_user_Id: current_ast.user_id,
+
+                                buy_order_id: order_id,
+                                sell_order_id: current_ast.order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+
+
+
+
+                            //dbWorkerclient.lPush(
+                            //    `settlement-queue`,
+                            //    JSON.stringify(res_data, payload),
+                            //);
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill, payload),
+                            );
                             market.asks.set(v, {
                                 ...k,
                                 quantity: k.quantity - (payload.quantity - filled_quantity),
                             });
+
                         } else if (k.quantity <= payload.quantity - filled_quantity) {
                             //remove from orderbook, increase the fill
 
@@ -180,6 +232,32 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             console.log({ filled_quantityAT_161: filled_quantity });
 
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: current_ast.quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: payload.user_id,
+                                sell_user_Id: current_ast.user_id,
+
+                                buy_order_id: order_id,
+                                sell_order_id: current_ast.order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+
+
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill, payload),
+                            );
                             market.asks.delete(v);
                         }
                     }
@@ -224,12 +302,11 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
             const res_data: engineResponse = {
                 request_id,
-                data: {
-                    price: payload.price,
-                    filled_quantity: filled_quantity
-                },
+                order_id,
+                price: payload.price,
+                filled_quantity: filled_quantity,
                 status: 'order accepted',
-                message: ''
+                message: 'Order got filled'
             };
             console.log({ finalOrderbook: ORDERBOOK });
 
@@ -237,6 +314,14 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                 `response-queue-${backend_id}`,
                 JSON.stringify(res_data),
             );
+
+            //send fills to db worker which has both buy and sell side of order details
+            //one order can have multiple fills to i have to send every fill details to db worker
+
+            //dbWorkerclient.lPush(
+            //    `settlement-queue`,
+            //    JSON.stringify(res_data, payload),
+            //);
             return;
         } else if (payload.side === 'sell') {
             console.log({ market });
@@ -304,6 +389,32 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             filled_quantity += payload.quantity - filled_quantity;
 
+
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: payload.quantity - filled_quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: payload.user_id,
+                                sell_user_Id: current_ast.user_id,
+
+                                buy_order_id: order_id,
+                                sell_order_id: current_ast.order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill, payload),
+                            );
+
                             market.asks.set(v, {
                                 ...k,
                                 quantity: k.quantity - (payload.quantity - filled_quantity),
@@ -321,6 +432,32 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                             filled_quantity += current_ast.quantity;
 
                             console.log({ filled_quantityAT_161: filled_quantity });
+
+
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: current_ast.quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: payload.user_id,
+                                sell_user_Id: current_ast.user_id,
+
+                                buy_order_id: order_id,
+                                sell_order_id: current_ast.order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill),
+                            );
 
                             market.asks.delete(v);
                         }
@@ -366,12 +503,11 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
             const res_data: engineResponse = {
                 request_id,
-                data: {
-                    price: payload.price,
-                    filled_quantity: filled_quantity
-                },
+                order_id,
+                price: payload.price,
+                filled_quantity: filled_quantity,
                 status: 'order accepted',
-                message: ''
+                message: 'Order got filled'
             };
             console.log({ finalOrderbook: ORDERBOOK });
 
@@ -379,6 +515,11 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                 `response-queue-${backend_id}`,
                 JSON.stringify(res_data),
             );
+
+            //dbWorkerclient.lPush(
+            //    `settlement-queue`,
+            //    JSON.stringify({ ...res_data, ...payload }),
+            //);
             return;
         }
     } else {
@@ -412,7 +553,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
             ) {
                 console.log('push to orderbook');
 
-                const order_id: string = crypto.randomUUID();
+                //const order_id: string = crypto.randomUUID();
 
                 //const set_asset: Order = {
                 //  order_id,
@@ -451,20 +592,21 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                 const res_data: engineResponse = {
                     request_id,
-                    data: {
-                        order_id,
-                        price: payload.price,
-                        filled_quantity: 0,
-                        fills: [],
-                    },
+                    order_id,
+                    price: payload.price,
+                    filled_quantity: 0,
                     status: 'order accepted',
-                    message: ''
+                    message: 'Sitting on orderbook'
                 };
 
                 publishclient.lPush(
                     `response-queue-${backend_id}`,
                     JSON.stringify(res_data),
                 );
+                //dbWorkerclient.lPush(
+                //    `settlement-queue`,
+                //    JSON.stringify({ ...res_data, ...payload }),
+                //);
                 return;
             } else {
                 console.log('else called');
@@ -505,12 +647,133 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                 if (total_quantity >= payload.quantity) {
                     //fully filled
                     //decrease and/or remove that asks side of this price
-                    let filled_orders = [];
                     let filled_quantity: any = 0;
 
                     for (let i = 0; i < matching_orders.length; i++) {
                         console.log(`Remove this order from asks: ${matching_orders[i]}`);
                         console.log({ currentORD: market.asks.get(matching_orders[i]) });
+
+                        const current_ast: any = market.asks.get(matching_orders[i]);
+                        console.log({ current_ast });
+
+                        if (current_ast.quantity > payload.quantity - filled_quantity) {
+                            console.log(
+                                'current order quantity more than the fill required. so decrease this order quantity',
+                            );
+
+                            filled_quantity = payload.quantity;
+
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: payload.quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: payload.user_id,
+                                sell_user_Id: current_ast.user_id,
+
+                                buy_order_id: order_id,
+                                sell_order_id: current_ast.order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+
+                            //decrease the order quantity, increase the fill
+
+
+
+
+                            console.log({ matching_orders, currrentMatch: matching_orders[i] });
+
+
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill),
+                            );
+
+                            market.asks.set(matching_orders[i], {
+                                ...current_ast,
+                                quantity:
+                                    current_ast.quantity - (payload.quantity - filled_quantity),
+                            });
+
+                        } else if (
+                            current_ast.quantity <=
+                            payload.quantity - filled_quantity
+                        ) {
+                            //remove from orderbook, increase the fill
+
+                            console.log(
+                                'current order quantity less than or equal to the fill required. so delete this order quantity',
+                            );
+
+                            filled_quantity += current_ast.quantity;
+
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: current_ast.quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: payload.user_id,
+                                sell_user_Id: current_ast.user_id,
+
+                                buy_order_id: order_id,
+                                sell_order_id: current_ast.order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill),
+                            );
+                            market.asks.delete(matching_orders[i]);
+                        }
+                    }
+
+                    console.log({ asks: market.asks });
+
+                    console.log({ filled_quantity });
+
+                    const res_data: engineResponse = {
+                        request_id,
+                        order_id,
+                        price: payload.price,
+                        filled_quantity: filled_quantity,
+                        status: 'order accepted',
+                        message: 'Order got filled'
+                    };
+                    console.log({ finalOrderbook: ORDERBOOK });
+
+                    publishclient.lPush(
+                        `response-queue-${backend_id}`,
+                        JSON.stringify(res_data),
+                    );
+                    //dbWorkerclient.lPush(
+                    //    `settlement-queue`,
+                    //    JSON.stringify({ ...res_data, ...payload }),
+                    //);
+                    return;
+                } else {
+                    //partially filled
+                    let filled_orders = [];
+                    let filled_quantity = 0;
+
+                    for (let i = 0; i < matching_orders.length; i++) {
+                        console.log(`Remove this order from bids: ${matching_orders[i]}`);
+                        console.log({ currentORD: market.bids.get(matching_orders[i]) });
 
                         const current_ast: any = market.asks.get(matching_orders[i]);
                         console.log({ current_ast });
@@ -528,18 +791,6 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                     current_ast.quantity - (payload.quantity - filled_quantity),
                             });
                             filled_quantity = payload.quantity;
-
-                            FILLS.push({
-                                type: 'market',
-                                side: 'buy',
-                                quantity: 0,
-                                price: 0,
-                                symbol: '',
-                                buy_order_id: '',
-                                sell_order_id: '',
-                                fill_id: '',
-                                created_at: 0,
-                            });
                         } else if (
                             current_ast.quantity <=
                             payload.quantity - filled_quantity
@@ -552,35 +803,64 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             filled_quantity += current_ast.quantity;
 
-                            //  FILLS.push({
-                            //    type: 'limit',
-                            //    side: 'buy',
-                            //    quantity: current_ast.quantity,
-                            //    price: current_ast.price,
-                            //    asset: current_ast.asset,
-                            //    buy_order_id: order,
-                            //    sell_order_id: '223',
-                            //    fill_id: crypto.randomUUID(),
-                            //    created_at: 0,
-                            //  });
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: current_ast.quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: payload.user_id,
+                                sell_user_Id: current_ast.user_id,
+
+                                buy_order_id: order_id,
+                                sell_order_id: current_ast.order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill),
+                            );
 
                             market.asks.delete(matching_orders[i]);
                         }
                     }
+                    console.log({ bids: market.bids });
 
                     console.log({ asks: market.asks });
 
                     console.log({ filled_quantity });
 
+
+                    market.bids.set(order_id, {
+                        order_id,
+
+                        side: payload.side,
+                        price: payload.price,
+                        quantity: payload.quantity - filled_quantity,
+                        user_id: payload.user_id,
+                        request_id,
+
+                        type: payload.type,
+
+                        symbol: payload.symbol,
+
+                        created_at: Date.now(),
+                    });
+
                     const res_data: engineResponse = {
                         request_id,
-                        data: {
-                            price: payload.price,
-                            filled_quantity: filled_quantity,
-                            fills: FILLS,
-                        },
+                        order_id,
+                        price: payload.price,
+                        filled_quantity: filled_quantity,
                         status: 'order accepted',
-                        message: ''
+                        message: 'Order is partially filled'
                     };
                     console.log({ finalOrderbook: ORDERBOOK });
 
@@ -588,31 +868,10 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                         `response-queue-${backend_id}`,
                         JSON.stringify(res_data),
                     );
-                    return;
-                } else {
-                    //partially filled
-                    let filled_orders = [];
-                    let filled_quantity = 0;
-
-                    console.log({ asks: market.asks });
-
-                    console.log({ filled_quantity });
-
-                    const res_data: engineResponse = {
-                        request_id,
-                        data: {
-                            price: payload.price,
-                            filled_quantity: filled_quantity,
-                        },
-                        status: 'order accepted',
-                        message: ''
-                    };
-                    console.log({ finalOrderbook: ORDERBOOK });
-
-                    publishclient.lPush(
-                        `response-queue-${backend_id}`,
-                        JSON.stringify(res_data),
-                    );
+                    //dbWorkerclient.lPush(
+                    //    `settlement-queue`,
+                    //    JSON.stringify({ ...res_data, ...payload }),
+                    //);
                     return;
                 }
 
@@ -646,7 +905,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
             ) {
                 console.log('push to orderbook');
 
-                const order_id: string = crypto.randomUUID();
+
 
                 console.log({ ORDERBOOK });
                 console.log({ bids: market.bids });
@@ -667,19 +926,21 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                 const res_data: engineResponse = {
                     request_id,
-                    data: {
-                        order_id,
-                        price: payload.price,
-                        filled_quantity: 0,
-                    },
+                    order_id,
+                    price: payload.price,
+                    filled_quantity: 0,
                     status: 'order accepted',
-                    message: ''
+                    message: 'Sitting on orderbook'
                 };
 
                 publishclient.lPush(
                     `response-queue-${backend_id}`,
                     JSON.stringify(res_data),
                 );
+                //dbWorkerclient.lPush(
+                //    `settlement-queue`,
+                //    JSON.stringify({ ...res_data, ...payload }),
+                //);
                 return;
             } else {
                 console.log('else called');
@@ -747,6 +1008,31 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             filled_quantity += current_ast.quantity;
 
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: current_ast.quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: current_ast.user_id,
+                                sell_user_Id: payload.user_id,
+
+                                buy_order_id: current_ast.order_id,
+                                sell_order_id: order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill),
+                            );
+
                             market.bids.delete(matching_orders[i]);
                         }
                     }
@@ -757,12 +1043,11 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                     const res_data: engineResponse = {
                         request_id,
-                        data: {
-                            price: payload.price,
-                            filled_quantity: filled_quantity,
-                        },
+                        order_id,
+                        price: payload.price,
+                        filled_quantity: filled_quantity,
                         status: 'order accepted',
-                        message: ''
+                        message: 'Order got filled'
                     };
                     console.log({ finalOrderbook: ORDERBOOK });
 
@@ -772,6 +1057,10 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                         `response-queue-${backend_id}`,
                         JSON.stringify(res_data),
                     );
+                    //dbWorkerclient.lPush(
+                    //    `settlement-queue`,
+                    //    JSON.stringify({ ...res_data, ...payload }),
+                    //);
                     return;
                 } else {
                     //partially filled
@@ -810,6 +1099,31 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             filled_quantity += current_ast.quantity;
 
+                            const fill: Fill = {
+                                type: payload.type,
+                                quantity: payload.quantity,
+                                filled_quantity: current_ast.quantity,
+                                price: payload.price,
+                                symbol: payload.symbol,
+
+                                buy_user_id: current_ast.user_id,
+                                sell_user_Id: payload.user_id,
+
+                                buy_order_id: current_ast.order_id,
+                                sell_order_id: order_id,
+
+                                fill_id: crypto.randomUUID(),
+                                created_at: Date.now()
+
+                            };
+                            console.log({ fill });
+                            FILLS.push(fill);
+
+                            dbWorkerclient.lPush(
+                                `settlement-queue`,
+                                JSON.stringify(fill),
+                            );
+
                             market.bids.delete(matching_orders[i]);
                         }
                     }
@@ -817,14 +1131,25 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                     console.log({ filled_quantity });
 
+                    market.asks.set(order_id, {
+                        order_id,
+                        side: payload.side,
+                        price: payload.price,
+                        quantity: payload.quantity - filled_quantity,
+                        user_id: payload.user_id,
+                        request_id,
+                        type: payload.type,
+                        symbol: payload.symbol,
+                        created_at: Date.now(),
+                    });
+
                     const res_data: engineResponse = {
                         request_id,
-                        data: {
-                            price: payload.price,
-                            filled_quantity: filled_quantity,
-                        },
+                        order_id,
+                        price: payload.price,
+                        filled_quantity: filled_quantity,
                         status: 'order accepted',
-                        message: ''
+                        message: 'Order got partially filled'
                     };
                     console.log({ finalOrderbook: ORDERBOOK });
 
@@ -832,6 +1157,10 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                         `response-queue-${backend_id}`,
                         JSON.stringify(res_data),
                     );
+                    //dbWorkerclient.lPush(
+                    //    `settlement-queue`,
+                    //    JSON.stringify({ ...res_data, ...payload }),
+                    //);
                     return;
                 }
             }
@@ -846,7 +1175,7 @@ const cancel_order = (payload: any, backend_id: string, request_id: string) => {
     console.log({ ORDERBOOK });
 
     console.log({ ORDERBOOK });
-    let order;
+    let order: any;
     ORDERBOOK.forEach((key, value) => {
         console.log({ key, value });
 
@@ -877,17 +1206,40 @@ const cancel_order = (payload: any, backend_id: string, request_id: string) => {
     console.log({ ORDERBOOK });
     console.log('order cancelled');
 
+
+    if (!order) {
+        const res_data: engineResponse = {
+            request_id,
+            order_id: '',
+            filled_quantity: 0,
+            price: payload.price,
+            status: 'order pending',
+            message: 'order not found'
+        };
+
+        publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
+        return;
+    }
+
     const res_data: engineResponse = {
         request_id,
-        data: {
-            price: payload.price,
-            order,
-        },
+        order_id: order.id,
+        price: payload.price,
+        data: order,
+        filled_quantity: 0,
         status: 'order cancelled',
         message: ''
     };
 
     publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
+
+
+    const settle = { request_id, status: 'order cancelled', filled_quantity: 0, message: '', ...order };
+
+    dbWorkerclient.lPush(
+        `settlement-queue`,
+        JSON.stringify(settle),
+    );
     return;
 };
 
@@ -917,12 +1269,12 @@ const get_order = (payload: any, backend_id: string, request_id: string) => {
 
     const res_data: engineResponse = {
         request_id,
-        data: {
-            price: payload.price,
-            order,
-        },
+        data: order,
         status: 'order pending',
-        message: ''
+        message: 'Order is Sitting on orderbook',
+        order_id: '',
+        price: 0,
+        filled_quantity: 0
     };
 
     publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
@@ -1026,6 +1378,9 @@ while (1) {
 
     console.log({ engine_status });
 
+    console.log({ FILLS });
+
+
 
     if (!incoming_req) {
         continue;
@@ -1039,6 +1394,9 @@ while (1) {
             request_id: parsed_req.request_id,
             status: 'order rejected',
             message: 'Matching engine is not ready to accept orders',
+            order_id: '',
+            price: 0,
+            filled_quantity: 0
         };
 
         publishclient.lPush(

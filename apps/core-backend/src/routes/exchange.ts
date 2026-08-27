@@ -33,11 +33,22 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         return res.status(404).json({ message: "Marekt not available" })
     }
 
-    const wallet = await get_balance(user_id);
+    const asts = symbol.split(/_/);
+    console.log({ asts });
 
-    console.log({ wallet });
+    const base_ast = await find_asset(asts[0]);
+    const quote_ast = await find_asset(asts[1]);
+    if (!base_ast || !quote_ast) {
+        return;
+    }
 
-    if (!wallet) {
+    const base_bal = await get_balance(user_id, asts[0]);
+    const quote_bal = await get_balance(user_id, asts[1]);
+
+    console.log({ quote_bal, base_bal });
+
+
+    if (!quote_bal || !base_bal) {
         return res.status(404).json({ message: "Not have valid wallet! Please fund you wallet" })
     }
 
@@ -45,20 +56,14 @@ router.post('/api/exchange/spot/order', async (req, res) => {
     //for buy, check the currency balance, for sell check the asset balance
     //for buy lock the currency, for sell lock the asset
 
-    const asts = symbol.split(/_/);
-    console.log({ asts });
-
-    const base_ast = await find_asset(asts[0]);
-    const quote_ast = await find_asset(asts[1]);
 
     console.log({ base_ast, quote_ast });
 
-    if (!base_ast || !quote_ast) {
-        return;
-    }
 
-    if (required_bal > (wallet.balance - wallet.locked_balance)) {
-        return res.status(404).json({ message: 'Insufficient wallet or asset balance' });
+    if (side == 'buy' && required_bal * quote_ast.decimals >= (quote_bal.balance - quote_bal.locked_balance)) {
+        return res.status(404).json({ message: 'Insufficient wallet balance' });
+    } else if (side == 'sell' && quantity * base_ast.decimals >= base_bal.balance) {
+        return res.status(404).json({ message: 'Insufficient asset balance' });
     }
 
     if (side == 'buy') {
@@ -115,7 +120,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
 
     //The engine must reply to message.responseQueue and include the same correlationId.
 
-    const payload = { type, quantity, price, symbol, side, user_id };
+    const payload: any = { type, quantity, price, symbol, side, user_id };
 
 
     await client.lPush(
