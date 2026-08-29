@@ -1,0 +1,21 @@
+{
+    "name": "risk-engine",
+    "module": "index.ts",
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "engine": "bun run index.ts",
+        "liquidation": "bun run liquidation.ts",
+        "funding-fee": "bun run funding-fee.ts"
+    },
+    "dependencies": {
+        "database": "workspace:*",
+        "shared-types": "workspace:*"
+    },
+    "devDependencies": {
+        "@types/bun": "latest"
+    },
+    "peerDependencies": {
+        "typescript": "^5.9.2"
+    }
+}

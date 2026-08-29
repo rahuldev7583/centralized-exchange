@@ -11,11 +11,12 @@
         "@types/bun": "latest"
     },
     "peerDependencies": {
-        "typescript": "^5"
+        "typescript": "^5.9.2"
     },
     "dependencies": {
         "crypto": "^1.0.1",
         "redis": "^5.12.1",
-        "database": "workspace:*"
+        "database": "workspace:*",
+        "shared-types": "workspace:*"
     }
 }

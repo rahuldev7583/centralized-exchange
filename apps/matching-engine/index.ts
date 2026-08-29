@@ -1,5 +1,5 @@
 import { createClient } from 'redis';
-import { ASSETS, FILLS, ORDERBOOK, type Fill, type OpenOrder, type Order, type Orderbook } from './store';
+import { ASSETS, FILLS, ORDERBOOK, type Fill, type OpenOrder, type Order, type Orderbook } from "shared-types";
 import { prisma } from "database";
 
 export type engineStatus = | 'pending' | 'ready' | 'down';
