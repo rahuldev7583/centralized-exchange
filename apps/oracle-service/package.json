@@ -1,0 +1,22 @@
+{
+    "name": "oracle-service",
+    "module": "index.ts",
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "dev": "bun run index.ts"
+    },
+    "devDependencies": {
+        "@types/bun": "latest"
+    },
+    "peerDependencies": {
+        "typescript": "^7.0.2"
+    },
+    "dependencies": {
+        "@types/node": "^26.4.0",
+        "@types/ws": "^8.18.1",
+        "redis": "^6.2.1",
+        "ts-node": "^10.9.2",
+        "ws": "^8.21.3"
+    }
+}
