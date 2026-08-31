@@ -1,5 +1,5 @@
 import express from 'express';
-import { BACKEND_ID, client, get_identifier } from '..';
+import { BACKEND_ID, client, riskEngineclient, get_identifier, leverageClient } from '..';
 import { find_asset, find_market, get_balance } from '../middleware/exchange';
 import { prisma } from 'database';
 
@@ -136,7 +136,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
     //  wait until we got request identifier
     //return filled quantity
 
-    const res_data: any = await get_identifier();
+    const res_data: any = await get_identifier('response-queue');
 
     console.log({ res_data });
 
@@ -169,43 +169,47 @@ router.post('/api/exchange/future/order', async (req, res) => {
     //  wait until we got request identifier
     //return filled quantity
 
-    const { type, side, quantity, price, asset, user_id } = req.body;
+    const { type, side, quantity, price, symbol } = req.body;
 
-    console.log({ asset });
+    console.log({ symbol });
+    const start_time = Date.now();
+
+    const user_id = req.user;
+    console.log({ user_id });
+
+    const mkt = await find_market(symbol);
+
+    console.log({ mkt });
+
+    if (!mkt) {
+        return res.status(404).json({ message: "Marekt not available" })
+    }
+
+    const asts = symbol.split(/_/);
+    console.log({ asts });
+
+    const base_ast = await find_asset(asts[0]);
+    const quote_ast = await find_asset(asts[1]);
+    if (!base_ast || !quote_ast) {
+        return;
+    }
+
+    const base_bal = await get_balance(user_id, asts[0]);
+    const quote_bal = await get_balance(user_id, asts[1]);
+
+    if (!quote_bal || !base_bal) {
+        return res.status(404).json({ message: "Not have valid wallet! Please fund you wallet" })
+    }
+    const required_bal = price * quantity;
+    //for buy, check the currency balance, for sell check the asset balance
+    //for buy lock the currency, for sell lock the asset
+
+
+    console.log({ base_ast, quote_ast });
 
     const request_id = crypto.randomUUID();
 
     console.log({ request_id });
-
-    const wallet_balance = 100000;
-
-    if (side == 'buy' && price * quantity > wallet_balance) {
-        return res.status(404).json({ message: 'Insufficient wallet balance' });
-    }
-
-    //  get from db
-    const available_assets = [
-        {
-            asset: 'BTC',
-            quantity: 100,
-        },
-        {
-            asset: 'ETH',
-            quantity: 200,
-        },
-    ];
-
-    const current_asset: any = available_assets.find((a) => a.asset == asset);
-
-    if (!current_asset) {
-        return res.status(404).json({ message: 'Asset not found' });
-    }
-
-    if (side == 'sell' && current_asset?.quantity < quantity) {
-        return res
-            .status(404)
-            .json({ message: 'Not enough asset quantity to sell' });
-    }
 
     // Every message sent from the backend to the engine includes:
 
@@ -216,10 +220,10 @@ router.post('/api/exchange/future/order', async (req, res) => {
 
     //The engine must reply to message.responseQueue and include the same correlationId.
 
-    const payload = { type, quantity, price, asset, user_id, side };
+    const payload: any = { type, quantity, price, symbol, side, user_id };
 
-    await client.lPush(
-        `incoming-request`,
+    await riskEngineclient.lPush(
+        `risk-engine-req-queue`,
         JSON.stringify({
             BACKEND_ID,
             request_id,
@@ -231,7 +235,7 @@ router.post('/api/exchange/future/order', async (req, res) => {
     //  wait until we got request identifier
     //return filled quantity
 
-    const res_data: any = await get_identifier();
+    const res_data: any = await get_identifier('response-queue');
 
     console.log({ res_data });
 
@@ -264,7 +268,7 @@ router.get('/api/exchange/spot/order/:order_id', async (req, res) => {
     //  wait until we got request identifier
     //return filled quantity
 
-    const res_data: any = await get_identifier();
+    const res_data: any = await get_identifier('response-queue');
 
     console.log({ res_data });
 
@@ -301,7 +305,7 @@ router.delete('/api/exchange/spot/order/:order_id', async (req, res) => {
     //  wait until we got request identifier
     //return filled quantity
 
-    const res_data: any = await get_identifier();
+    const res_data: any = await get_identifier('response-queue');
 
     console.log({ res_data });
 
@@ -318,5 +322,42 @@ router.get('/api/exchange/depth/:symbol', (req, res) => {
     //sends get-depth to engine
 });
 
+
+router.post('/api/exchange/leverage', async (req, res) => {
+    //send leverage update command to risk engine
+    //get the confirmation
+
+    const req_body = req.body;
+
+    const leverage = req_body.leverage;
+
+    console.log({ leverage });
+
+    const user_id = req.user;
+    console.log({ user_id });
+
+    const request_id = crypto.randomUUID();
+
+
+
+    await leverageClient.lPush(
+        `leverage-req-queue`,
+        JSON.stringify({
+            BACKEND_ID,
+            request_id,
+            payload: { leverage, user_id },
+            command: 'leverage-update',
+        }),
+    );
+    const res_data: any = await get_identifier('leverage-res-queue', false);
+
+    console.log({ res_data });
+
+    const parsed_res = JSON.parse(res_data?.element);
+
+    console.log({ parsed_res });
+
+    res.json({ message: parsed_res.status, data: parsed_res });
+})
 
 export default router;

@@ -32,7 +32,25 @@ client.on('error', (err: any) =>
 client.connect();
 console.log('Connected');
 
-export async function get_identifier() {
+export const riskEngineclient = createClient();
+
+riskEngineclient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+
+riskEngineclient.connect();
+console.log('riskEngineclient Connected');
+
+export const leverageClient = createClient();
+
+leverageClient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+
+leverageClient.connect();
+console.log('leverage Connected');
+
+export async function get_identifier(queue: string, backend?: boolean) {
     const res_client = createClient();
 
     res_client.on('error', (err: any) =>
@@ -41,7 +59,8 @@ export async function get_identifier() {
 
     res_client.connect();
     console.log('Connected');
-    const queue_res = await res_client.brPop(`response-queue-${BACKEND_ID}`, 2);
+    const url = !backend ? queue : `${queue}-${BACKEND_ID}`;
+    const queue_res = await res_client.brPop(url, 2);
 
     console.log('wait for identifier');
 

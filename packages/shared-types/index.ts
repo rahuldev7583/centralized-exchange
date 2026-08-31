@@ -5,6 +5,8 @@ export type order_status = 'filled' | 'partially_filled' | 'cancelled';
 export interface Balance {
     available: number;
     locked: number;
+    asset_id: string,
+    user_id: string
 }
 
 export interface OpenOrder {
@@ -63,7 +65,29 @@ export const ORDERBOOK = new Map<string, Orderbook>();
 export const ORDERS = new Map<string, Order>();
 
 export const FILLS: Fill[] = [];
-export const BALANCES = new Map<string, Record<string, Balance>>();
+//export const BALANCES = new Map<string, Record<string, Balance>>();
+export const BALANCES: Balance[] = [];
 
 export const ASSETS: Asset[] = [];
 
+
+export const priceToBigInt18 = (number: string) => {
+
+    const [whole, float] = number.split(".");
+
+    console.log({ whole, float });
+
+    const padded = float?.padEnd(18, '0').slice(0, 18);
+
+    console.log({ padded });
+
+    if (!whole || !float) {
+        return BigInt(0)
+    }
+
+    let wh_p = whole + padded;
+
+    console.log({ wh_p });
+
+    return BigInt(Number(whole) + Number(padded))
+}

@@ -47,13 +47,14 @@ model User {
     user_type  UserType        @default(User)
     orders     Order[]
     asset      Asset_balance[]
+    leverage   leverage[]
 }
 
 model Asset {
     id       Int    @id @default(autoincrement())
     name     String
     symbol   String @unique
-    decimals Int
+    decimals BigInt
 
     created_at DateTime @default(now())
     updated_at DateTime @updatedAt
@@ -61,10 +62,13 @@ model Asset {
     admin         Admin? @relation(fields: [adminAdmin_id], references: [admin_id])
     adminAdmin_id Int?
 
-    base_markets      Market[]        @relation("BaseAsset")
-    quote_markets     Market[]        @relation("QuoteAsset")
-    assetBalances     Asset_balance[]
-    last_traded_price Int             @default(0)
+    base_markets  Market[]        @relation("BaseAsset")
+    quote_markets Market[]        @relation("QuoteAsset")
+    assetBalances Asset_balance[]
+
+    last_traded_price BigInt @default(0)
+
+    price AssetPrice[]
 }
 
 model Market {
@@ -123,6 +127,9 @@ model Order {
     marketId    Int
     userUser_id Int
 
+    entry_price    Int @default(0)
+    initial_margin Int @default(0)
+
     ask_fill Fill[] @relation("AskOrder")
     bid_fill Fill[] @relation("BidOrder")
 }
@@ -142,4 +149,34 @@ model Fill {
 
     ask_orderId Int
     bid_orderId Int
+}
+
+model leverage {
+    id Int @id @default(autoincrement())
+
+    limit Int
+
+    user    User @relation(fields: [user_id], references: [user_id])
+    user_id Int
+
+    created_at DateTime @default(now())
+    updated_at DateTime @updatedAt
+
+    @@unique([user_id])
+}
+
+model AssetPrice {
+    id     Int    @id @default(autoincrement())
+    symbol String
+
+    index_price BigInt
+    mark_price  BigInt
+
+    timestamp DateTime @db.Timestamptz()
+
+    created_at DateTime @default(now())
+    asset      Asset?   @relation(fields: [assetId], references: [id])
+    assetId    Int?
+
+    @@unique([assetId, timestamp])
 }
