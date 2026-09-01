@@ -1,3 +1,4 @@
+import { Prisma, prisma } from "database";
 export type side = 'buy' | 'sell';
 export type type = 'limit' | 'market';
 export type order_status = 'filled' | 'partially_filled' | 'cancelled';
@@ -91,3 +92,21 @@ export const priceToBigInt18 = (number: string) => {
 
     return BigInt(Number(whole) + Number(padded))
 }
+
+export const scaledDecimal = async (value: number, decimal: number) => {
+    const base = new Prisma.Decimal(value);
+    const factor = new Prisma.Decimal(10).pow(decimal);
+
+    const result = base.mul(factor);
+
+    return result.toDecimalPlaces(0);
+}
+
+export const readableDecimal = async (decimalVal: Prisma.Decimal, decimal: number) => {
+
+    const factor = new Prisma.Decimal(10).pow(decimal);
+    const result = decimalVal.div(factor)
+
+    return result.toFixed(decimal);
+}
+

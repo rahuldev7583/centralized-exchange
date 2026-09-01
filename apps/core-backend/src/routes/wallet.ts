@@ -2,6 +2,7 @@ import expres from "express";
 import { ZodError } from "zod";
 //import { prisma } from "../../lib/prisma";
 import { prisma } from "database";
+import { readableDecimal, scaledDecimal } from "shared-types";
 
 const router = expres.Router();
 
@@ -55,6 +56,9 @@ router.post('/api/wallet/onramp', async (req, res) => {
                 //    }
                 //});
 
+                const dec = Number(all_ast[i].decimals);
+                const balance = await scaledDecimal(amount, dec)
+
                 await prisma.asset_balance.upsert({
                     where: {
                         user_id_assetId: {
@@ -63,14 +67,14 @@ router.post('/api/wallet/onramp', async (req, res) => {
                         }
                     },
                     create: {
-                        balance: amount * all_ast[i].decimals,
+                        balance: balance,
                         locked_balance: 0,
                         assetId: primary_ast?.id,
                         user_id: user_id
                     },
                     update: {
                         balance: {
-                            increment: amount * all_ast[i].decimals
+                            increment: balance
                         }
                     }
                 })
@@ -220,10 +224,14 @@ router.get('/api/wallet/balance', async (req, res) => {
                 }
             });
 
+            if (!ast) {
+                return
+            }
+
             ast_balances.push({
                 asset: all_ast[i].name,
-                available: ast?.balance,
-                locked: ast?.locked_balance
+                available: await readableDecimal(ast.balance, Number(all_ast[i].decimals)),
+                locked: await readableDecimal(ast.locked_balance, Number(all_ast[i].decimals))
             });
         }
         res.json({ message: "Wallet and Asset fetched successfully", ast_balances })

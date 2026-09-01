@@ -11,23 +11,23 @@ export const Asset = z.object({
     decimals: z.number().min(0).max(100)
 })
 
-export enum MarketType { Spot = "SPot", Perp = "Perp" }
+export enum MarketType { Spot = "spot", Perp = "perp" }
 
 export const Market = z.object({
     name: z.string().min(3).max(20),
-    symbol: z.string().min(3).max(10),
+    symbol: z.string().min(3).max(15),
     type: z.nativeEnum(MarketType),
     base_asset_symbol: z.string().min(3).max(20),
     quote_asset_symbol: z.string().min(3).max(20)
 })
 
-enum Type { "Limit", "Market" }
-enum Side { "buy", "sell" }
+enum Type { Limit = "limit", Market = "market" }
+enum Side { Buy = "buy", Sell = "sell" }
 
 export const Order = z.object({
-    type: Type,
-    side: Side,
+    type: z.nativeEnum(Type),
+    side: z.nativeEnum(Side),
     quantity: z.number().min(1),
     price: z.number().min(1),
-    asset: z.string().min(3).max(10)
+    symbol: z.string().min(3).max(20)
 })

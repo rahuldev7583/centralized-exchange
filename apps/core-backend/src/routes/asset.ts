@@ -46,7 +46,8 @@ router.post('/api/exchange/asset/add', adminAuthMiddleware, async (req, res) => 
                 name: parsedAsset.name,
                 symbol: parsedAsset.symbol,
                 decimals: parsedAsset.decimals,
-                adminAdmin_id: admin
+                adminAdmin_id: admin,
+                last_traded_price: 0
             },
         });
         return res.status(201).json({
@@ -146,7 +147,8 @@ router.post('/api/exchange/market/add', adminAuthMiddleware, async (req, res) =>
         const existing_market = await prisma.market.findFirst({
             where: {
                 base_asset_id: base_ast?.id,
-                quote_asset_id: quote_ast?.id
+                quote_asset_id: quote_ast?.id,
+                type: parsedMarket.type[0].toUpperCase() + parsedMarket.type.slice(1).toLowerCase()
             },
         });
 

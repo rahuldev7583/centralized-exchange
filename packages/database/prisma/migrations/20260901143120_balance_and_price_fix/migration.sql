@@ -1,0 +1,21 @@
+-- AlterTable
+ALTER TABLE "Asset" ALTER COLUMN "last_traded_price" DROP DEFAULT,
+ALTER COLUMN "last_traded_price" SET DATA TYPE DECIMAL(78,0);
+
+-- AlterTable
+ALTER TABLE "AssetPrice" ALTER COLUMN "index_price" SET DATA TYPE DECIMAL(78,0),
+ALTER COLUMN "mark_price" SET DATA TYPE DECIMAL(78,0);
+
+-- AlterTable
+ALTER TABLE "Asset_balance" ALTER COLUMN "balance" SET DATA TYPE DECIMAL(78,0),
+ALTER COLUMN "locked_balance" SET DATA TYPE DECIMAL(78,0);
+
+-- AlterTable
+ALTER TABLE "Fill" ALTER COLUMN "price" SET DATA TYPE DECIMAL(78,0);
+
+-- AlterTable
+ALTER TABLE "Order" ALTER COLUMN "price" SET DATA TYPE DECIMAL(78,0),
+ALTER COLUMN "entry_price" DROP DEFAULT,
+ALTER COLUMN "entry_price" SET DATA TYPE DECIMAL(78,0),
+ALTER COLUMN "initial_margin" DROP DEFAULT,
+ALTER COLUMN "initial_margin" SET DATA TYPE DECIMAL(78,0);

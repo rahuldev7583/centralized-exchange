@@ -55,7 +55,7 @@ export const get_balance = async (user_id: number, asset?: string) => {
         })
         console.log({ ast_bal });
 
-        return ast_bal ? { balance: ast_bal.balance / ast.decimals, locked_balance: ast_bal.locked_balance / ast.decimals } : null;
+        return ast_bal ? { balance: Number(ast_bal.balance), locked_balance: Number(ast_bal.locked_balance) } : null;
 
     } catch (error) {
         console.log({ error });

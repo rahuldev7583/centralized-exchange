@@ -66,7 +66,7 @@ model Asset {
     quote_markets Market[]        @relation("QuoteAsset")
     assetBalances Asset_balance[]
 
-    last_traded_price BigInt @default(0)
+    last_traded_price Decimal @db.Decimal(78, 0)
 
     price AssetPrice[]
 }
@@ -94,9 +94,9 @@ model Market {
 }
 
 model Asset_balance {
-    id             Int @id @default(autoincrement())
-    balance        Int
-    locked_balance Int
+    id             Int     @id @default(autoincrement())
+    balance        Decimal @db.Decimal(78, 0)
+    locked_balance Decimal @db.Decimal(78, 0)
 
     asset Asset @relation(fields: [assetId], references: [id])
 
@@ -111,9 +111,9 @@ model Asset_balance {
 }
 
 model Order {
-    id       Int    @id @default(autoincrement())
+    id       Int     @id @default(autoincrement())
     type     String
-    price    Int
+    price    Decimal @db.Decimal(78, 0)
     quantity Int
     filled   Int
     status   String
@@ -127,17 +127,17 @@ model Order {
     marketId    Int
     userUser_id Int
 
-    entry_price    Int @default(0)
-    initial_margin Int @default(0)
+    entry_price    Decimal @db.Decimal(78, 0)
+    initial_margin Decimal @db.Decimal(78, 0)
 
     ask_fill Fill[] @relation("AskOrder")
     bid_fill Fill[] @relation("BidOrder")
 }
 
 model Fill {
-    id       Int    @id @default(autoincrement())
+    id       Int     @id @default(autoincrement())
     type     String
-    price    Int
+    price    Decimal @db.Decimal(78, 0)
     quantity Int
     status   String
 
@@ -169,8 +169,8 @@ model AssetPrice {
     id     Int    @id @default(autoincrement())
     symbol String
 
-    index_price BigInt
-    mark_price  BigInt
+    index_price Decimal @db.Decimal(78, 0)
+    mark_price  Decimal @db.Decimal(78, 0)
 
     timestamp DateTime @db.Timestamptz()
 
