@@ -1,6 +1,6 @@
 import { createClient } from "redis";
-import { prisma } from "database";
-import { priceToBigInt18 } from "shared-types";
+import { Prisma, prisma } from "database";
+import { priceToBigInt18, scaledDecimal } from "shared-types";
 
 const client = createClient();
 
@@ -30,8 +30,14 @@ leveragePubclient.connect();
 console.log('leveragePubclient Connected');
 
 const STREAM_NAME = 'index-prices:events';
-const GROUP_NAME = 'index-prices_processors';
+const GROUP_NAME = 'index-prices-processors';
 const CONSUMER_NAME = `worker-${process.pid}`;
+
+// settlement-queue => client => listen settlement and fills from matching engine
+
+//leverage-db-queue => leverageclient => to listen leverage update from risk engine
+
+// leverage-res-queue => leveragePubClient => send back leverage update to api
 
 
 
@@ -103,8 +109,9 @@ const getIndexPrice = async () => {
                 return
             }
 
-            const index_price = priceToBigInt18(data.price);
-            const mark_price = ((index_price + ast.last_traded_price) / BigInt(2))
+            //const index_price = priceToBigInt18(data.price);
+            const index_price = data.price;
+            const mark_price = ((Number(index_price) + Number(ast.last_traded_price)) / 2);
 
             console.log({ index_price, mark_price });
 
@@ -174,7 +181,7 @@ while (1) {
 
     setInterval(async () => {
         await getIndexPrice()
-    }, 5 * 60 * 1000)
+    }, 1 * 60 * 1000)
 
     const settlement_req = await client.brPop('settlement-queue', 2);
 
@@ -251,8 +258,7 @@ while (1) {
             console.log("update asset balance");
             //i have to  update for base and quote asset balance for both buy and sell side
 
-
-            const buy_price = quote_ast.decimals * parsed_settlement_req.filled_quantity * parsed_settlement_req.price;
+            const buy_price = scaledDecimal(parsed_settlement_req.filled_quantity * parsed_settlement_req.price, Number(quote_ast.decimals));
 
             console.log({ buy_price });
 
@@ -265,7 +271,7 @@ while (1) {
                 },
                 data: {
                     locked_balance: {
-                        decrement: BigInt(buy_price)
+                        decrement: buy_price
                     },
 
                 }
@@ -274,9 +280,7 @@ while (1) {
             console.log({ buy_user_quote });
 
 
-            const base_increment_buy = base_ast.decimals * parsed_settlement_req.filled_quantity;
-
-            console.log({ base_increment_buy });
+            const base_increment_buy = scaledDecimal(parsed_settlement_req.filled_quantity, Number(base_ast.decimals));
 
 
             const buy_user_base = await prisma.asset_balance.update({
@@ -295,8 +299,7 @@ while (1) {
             })
             console.log({ buy_user_base });
 
-
-            const ask_price = base_ast.decimals * parsed_settlement_req.filled_quantity;
+            const ask_price = scaledDecimal(parsed_settlement_req.filled_quantity, Number(base_ast.decimals));
 
             console.log({ ask_price });
 
@@ -317,7 +320,7 @@ while (1) {
             })
             console.log({ sell_user_base });
 
-            const quote_bal = quote_ast.decimals * parsed_settlement_req.price * parsed_settlement_req.filled_quantity;
+            const quote_bal = scaledDecimal(parsed_settlement_req.price * parsed_settlement_req.filled_quantity, Number(quote_ast.decimals));
 
             console.log({ quote_bal });
 
@@ -347,6 +350,8 @@ while (1) {
 
             if (parsed_settlement_req.side == "buy") {
 
+                const quote_price = scaledDecimal(parsed_settlement_req.quantity * parsed_settlement_req.price, Number(quote_ast.decimals));
+
                 await prisma.asset_balance.update({
                     where: {
                         user_id_assetId: {
@@ -356,14 +361,16 @@ while (1) {
                     },
                     data: {
                         locked_balance: {
-                            decrement: quote_ast.decimals * parsed_settlement_req.quantity * parsed_settlement_req.price
+                            decrement: quote_price
                         },
                         balance: {
-                            increment: quote_ast.decimals * parsed_settlement_req.quantity * parsed_settlement_req.price
+                            increment: quote_price
                         }
                     }
                 })
             } else if (parsed_settlement_req.side == 'sell') {
+                const base_price = scaledDecimal(parsed_settlement_req.quantity, Number(base_ast.decimals));
+
                 await prisma.asset_balance.update({
                     where: {
                         user_id_assetId: {
@@ -373,10 +380,10 @@ while (1) {
                     },
                     data: {
                         locked_balance: {
-                            decrement: base_ast.decimals * parsed_settlement_req.quantity
+                            decrement: base_price
                         },
                         balance: {
-                            increment: base_ast.decimals * parsed_settlement_req.quantity
+                            increment: base_price
                         }
                     }
                 })

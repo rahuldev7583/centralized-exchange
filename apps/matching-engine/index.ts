@@ -58,6 +58,24 @@ dbWorkerclient.connect();
 
 console.log('dbWorkerclient Connected');
 
+const riskEngclient = createClient();
+
+riskEngclient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+
+riskEngclient.connect();
+console.log('riskEngclient Connected');
+
+//incoming-request => client => for receiving request from api to matching engine
+
+// response-queue-${backend_id}`, => publishclient=> for sending matching engine response back to api 
+
+// settlement-queue => dbWorkerclient => for db worker to fills and settlements
+
+// risk-to-matching-eng => riskEngclient => to receive perp order from risk engine
+
+
 //const ORDERBOOK: any = {
 //  BTC: {
 //    bids: [],
@@ -1380,12 +1398,10 @@ while (1) {
 
     console.log({ FILLS });
 
-
-
-    if (!incoming_req) {
-        continue;
-    }
-    const parsed_req = JSON.parse(incoming_req.element);
+    //if (!incoming_req) {
+    //    continue;
+    //}
+    const parsed_req = incoming_req && JSON.parse(incoming_req.element);
     console.log({ parsed_req });
 
 
@@ -1420,35 +1436,64 @@ while (1) {
     //filled
     //cancelled
 
-    if (parsed_req.command === 'create-order') {
-        console.log('create order called');
+    const incoming_risk_req = await riskEngclient.brPop("risk-to-matching-eng", 2);
 
-        create_order(
-            parsed_req.payload,
-            parsed_req.BACKEND_ID,
-            parsed_req.request_id,
-        );
-    } else if (parsed_req.command === 'cancel-order') {
-        cancel_order(
-            parsed_req.payload,
-            parsed_req.BACKEND_ID,
-            parsed_req.request_id,
-        );
-    } else if (parsed_req.command === 'get-order') {
-        get_order(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
-    } else if (parsed_req.command === 'get-balance') {
-        get_balance(
-            parsed_req.payload,
-            parsed_req.BACKEND_ID,
-            parsed_req.request_id,
-        );
-    } else if (parsed_req.command === 'get-depth') {
-        get_depth(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
-    } else if (parsed_req.command === 'create-asset') {
-        create_asset(
-            parsed_req.payload,
-            parsed_req.BACKEND_ID,
-            parsed_req.request_id,
-        );
+    const parsed_risk_req = incoming_risk_req && JSON.parse(incoming_risk_req.element)
+
+    if (parsed_req) {
+        if (parsed_req.command === 'create-order') {
+            console.log('create order called');
+
+            const price = Number(parsed_req.payload.price);
+            const quantity = Number(parsed_req.payload.quantity);
+
+            console.log({ price, quantity });
+
+
+            create_order(
+                { ...parsed_req.payload, price, quantity },
+                parsed_req.BACKEND_ID,
+                parsed_req.request_id,
+            );
+        } else if (parsed_req.command === 'cancel-order') {
+            cancel_order(
+                parsed_req.payload,
+                parsed_req.BACKEND_ID,
+                parsed_req.request_id,
+            );
+        } else if (parsed_req.command === 'get-order') {
+            get_order(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
+        } else if (parsed_req.command === 'get-balance') {
+            get_balance(
+                parsed_req.payload,
+                parsed_req.BACKEND_ID,
+                parsed_req.request_id,
+            );
+        } else if (parsed_req.command === 'get-depth') {
+            get_depth(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
+        } else if (parsed_req.command === 'create-asset') {
+            create_asset(
+                parsed_req.payload,
+                parsed_req.BACKEND_ID,
+                parsed_req.request_id,
+            );
+        }
+    }
+
+    if (parsed_risk_req) {
+        console.log({ parsed_risk_req });
+
+        if (parsed_risk_req.command === 'create-order') {
+            console.log('PERP create order called');
+
+            const price = Number(parsed_risk_req.payload.price);
+            const quantity = Number(parsed_risk_req.payload.quantity);
+
+            create_order(
+                { ...parsed_risk_req.payload, price, quantity },
+                parsed_risk_req.BACKEND_ID,
+                parsed_risk_req.request_id,
+            );
+        }
     }
 }

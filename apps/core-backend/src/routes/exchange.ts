@@ -5,8 +5,24 @@ import { prisma, Prisma } from 'database';
 import { scaledDecimal } from 'shared-types';
 import { Order } from '../types/user';
 import { ZodError } from 'zod';
+import { createClient } from 'redis';
 
 const router = express();
+
+const spotClient = createClient();
+spotClient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+
+spotClient.connect();
+console.log('spotClient Connected');
+
+const perpClient = createClient();
+perpClient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+perpClient.connect();
+console.log('perpClient Connected');
 
 router.post('/api/exchange/spot/order', async (req, res) => {
     //todo
@@ -131,7 +147,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         const payload_price = new Prisma.Decimal(price);
         const payload_quantity = new Prisma.Decimal(quantity);
 
-        const payload: any = { type, payload_quantity, payload_price, symbol, side, user_id };
+        const payload: any = { type, quantity: payload_quantity, price: payload_price, symbol, side, user_id };
 
 
         await client.lPush(
@@ -147,8 +163,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const res_data: any = await get_identifier('response-queue');
-
+        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 0);
         console.log({ res_data });
 
         if (!res_data) {
@@ -167,7 +182,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         const res_time = end_time - start_time;
         res.json({ message: parsed_res.status, data: parsed_res, respnose_time: res_time });
     } catch (error) {
-        console.log({ error }); n
+        console.log({ error });
         console.log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
@@ -189,80 +204,96 @@ router.post('/api/exchange/future/order', async (req, res) => {
     //  wait until we got request identifier
     //return filled quantity
 
-    const { type, side, quantity, price, symbol } = req.body;
+    try {
+        const req_body = req.body;
+        const { type, side, quantity, price, symbol } = Order.parse(req_body);
 
-    console.log({ symbol });
-    const start_time = Date.now();
+        console.log({ symbol });
+        const start_time = Date.now();
 
-    const user_id = req.user;
-    console.log({ user_id });
+        const user_id = req.user;
+        console.log({ user_id });
 
-    const mkt = await find_market(symbol);
+        const mkt = await find_market(symbol);
 
-    console.log({ mkt });
+        console.log({ mkt });
 
-    if (!mkt) {
-        return res.status(404).json({ message: "Marekt not available" })
+        if (!mkt) {
+            return res.status(404).json({ message: "Marekt not available" })
+        }
+
+        const asts = symbol.split(/_/);
+        console.log({ asts });
+
+        const base_ast = await find_asset(asts[0]);
+        const quote_ast = await find_asset(asts[1]);
+        if (!base_ast || !quote_ast) {
+            return;
+        }
+
+        const base_bal = await get_balance(user_id, asts[0]);
+        const quote_bal = await get_balance(user_id, asts[1]);
+
+        if (!quote_bal || !base_bal) {
+            return res.status(404).json({ message: "Not have valid wallet! Please fund you wallet" })
+        }
+        //for buy, check the currency balance, for sell check the asset balance
+        //for buy lock the currency, for sell lock the asset
+
+
+        console.log({ base_ast, quote_ast });
+
+        const request_id = crypto.randomUUID();
+
+        console.log({ request_id });
+
+        // Every message sent from the backend to the engine includes:
+
+        //correlationId
+        //responseQueue
+        //type
+        //payload
+
+        //The engine must reply to message.responseQueue and include the same correlationId.
+
+        const payload: any = { type, quantity, price, symbol, side, user_id };
+
+        await riskEngineclient.lPush(
+            `risk-engine-req-queue`,
+            JSON.stringify({
+                BACKEND_ID,
+                request_id,
+                payload,
+                command: 'create-order',
+            }),
+        );
+
+        //  wait until we got request identifier
+        //return filled quantity
+
+        //const res_data: any = await get_identifier('response-queue', true);
+
+        console.log({
+            url: `response-queue-${BACKEND_ID}`
+        });
+        const res_data = await perpClient.brPop(`response-queue-perp-${BACKEND_ID}`, 2);
+
+        console.log({ res_data });
+
+        const parsed_res = JSON.parse(res_data?.element);
+
+        console.log({ parsed_res });
+
+        res.json({ message: 'order placed', data: parsed_res });
+
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
     }
-
-    const asts = symbol.split(/_/);
-    console.log({ asts });
-
-    const base_ast = await find_asset(asts[0]);
-    const quote_ast = await find_asset(asts[1]);
-    if (!base_ast || !quote_ast) {
-        return;
-    }
-
-    const base_bal = await get_balance(user_id, asts[0]);
-    const quote_bal = await get_balance(user_id, asts[1]);
-
-    if (!quote_bal || !base_bal) {
-        return res.status(404).json({ message: "Not have valid wallet! Please fund you wallet" })
-    }
-    //for buy, check the currency balance, for sell check the asset balance
-    //for buy lock the currency, for sell lock the asset
-
-
-    console.log({ base_ast, quote_ast });
-
-    const request_id = crypto.randomUUID();
-
-    console.log({ request_id });
-
-    // Every message sent from the backend to the engine includes:
-
-    //correlationId
-    //responseQueue
-    //type
-    //payload
-
-    //The engine must reply to message.responseQueue and include the same correlationId.
-
-    const payload: any = { type, quantity, price, symbol, side, user_id };
-
-    await riskEngineclient.lPush(
-        `risk-engine-req-queue`,
-        JSON.stringify({
-            BACKEND_ID,
-            request_id,
-            payload,
-            command: 'create-order',
-        }),
-    );
-
-    //  wait until we got request identifier
-    //return filled quantity
-
-    const res_data: any = await get_identifier('response-queue');
-
-    console.log({ res_data });
-
-    const parsed_res = JSON.parse(res_data?.element);
-
-    console.log({ parsed_res });
-
-    res.json({ message: 'order placed', data: parsed_res });
 });
 
 router.get('/api/exchange/spot/order/:order_id', async (req, res) => {

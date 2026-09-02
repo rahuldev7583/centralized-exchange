@@ -7,6 +7,8 @@ client.connect();
 console.log('Connected');
 client.on('error', (err) => console.error('Redis Client Error', err));
 
+//index-prices:events => stream index prices 
+
 const BINANCE_WS_STREAM_URL = process.env.BINANCE_WS_STREAM_URL || '';
 
 if (!BINANCE_WS_STREAM_URL) {
@@ -21,7 +23,7 @@ const pushToRedisStream = async (data: any) => {
         const messageId = await client.xAdd(streamName, '*', data);
         console.log(`[Producer] Event written successfully with ID: ${messageId}`);
 
-        return true
+        return;
     } catch (error) {
         console.log({ error });
 
@@ -53,12 +55,8 @@ ws.on('message', (data) => {
 
     console.log({ asset });
 
-    setInterval(async () => {
-        console.log("Asset Price push to matching engine, risk engine redis stream");
-        await pushToRedisStream(asset)
-
-    }, 1000);
-
+    console.log("Asset Price push to matching engine, risk engine redis stream");
+    pushToRedisStream(asset)
 
 });
 
