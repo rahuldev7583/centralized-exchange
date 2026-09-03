@@ -67,6 +67,15 @@ riskEngclient.on('error', (err: any) =>
 riskEngclient.connect();
 console.log('riskEngclient Connected');
 
+const riskEngPubclient = createClient();
+
+riskEngPubclient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+
+riskEngPubclient.connect();
+console.log('riskEngPubclient Connected');
+
 //incoming-request => client => for receiving request from api to matching engine
 
 // response-queue-${backend_id}`, => publishclient=> for sending matching engine response back to api 
@@ -213,12 +222,11 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: current_ast.order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
-
-
 
 
                             //dbWorkerclient.lPush(
@@ -231,10 +239,22 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 `settlement-queue`,
                                 JSON.stringify(fill, payload),
                             );
+
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
+                            );
+
                             market.asks.set(v, {
                                 ...k,
                                 quantity: k.quantity - (payload.quantity - filled_quantity),
                             });
+
+
 
                         } else if (k.quantity <= payload.quantity - filled_quantity) {
                             //remove from orderbook, increase the fill
@@ -264,7 +284,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: current_ast.order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
@@ -276,6 +297,17 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 `settlement-queue`,
                                 JSON.stringify(fill, payload),
                             );
+
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
+                            );
+
                             market.asks.delete(v);
                         }
                     }
@@ -422,7 +454,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: current_ast.order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
@@ -431,6 +464,16 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
                                 JSON.stringify(fill, payload),
+                            );
+
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
                             );
 
                             market.asks.set(v, {
@@ -466,7 +509,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: current_ast.order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
@@ -476,6 +520,15 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 `settlement-queue`,
                                 JSON.stringify(fill),
                             );
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
+                            );
+
 
                             market.asks.delete(v);
                         }
@@ -608,6 +661,27 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                 console.log({ bids: market.bids });
 
+                const risk_eng_payload = {
+                    order: {
+                        order_id,
+                        side: payload.side,
+                        price: payload.price,
+                        quantity: payload.quantity,
+                        user_id: payload.user_id,
+                        request_id,
+                        type: payload.type,
+                        symbol: payload.symbol,
+                        created_at: Date.now(),
+                    },
+                    command: "add-order"
+                };
+
+                riskEngPubclient.lPush(
+                    `matching-to-risk-pub-queue`,
+                    JSON.stringify(risk_eng_payload),
+                );
+
+
                 const res_data: engineResponse = {
                     request_id,
                     order_id,
@@ -695,7 +769,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: current_ast.order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
@@ -710,10 +785,21 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             FILLS.push(fill);
 
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+
+
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
                                 JSON.stringify(fill),
                             );
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
+                            );
+
 
                             market.asks.set(matching_orders[i], {
                                 ...current_ast,
@@ -747,7 +833,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: current_ast.order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
@@ -757,6 +844,16 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 `settlement-queue`,
                                 JSON.stringify(fill),
                             );
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
+                            );
+
                             market.asks.delete(matching_orders[i]);
                         }
                     }
@@ -835,7 +932,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: current_ast.order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
@@ -844,6 +942,14 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
                                 JSON.stringify(fill),
+                            );
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
                             );
 
                             market.asks.delete(matching_orders[i]);
@@ -941,6 +1047,27 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                 });
 
                 console.log({ bids: market.bids });
+
+                const risk_eng_payload = {
+                    order: {
+                        order_id,
+                        side: payload.side,
+                        price: payload.price,
+                        quantity: payload.quantity,
+                        user_id: payload.user_id,
+                        request_id,
+                        type: payload.type,
+                        symbol: payload.symbol,
+                        created_at: Date.now(),
+                    },
+                    command: "add-order"
+                };
+
+                riskEngPubclient.lPush(
+                    `matching-to-risk-pub-queue`,
+                    JSON.stringify(risk_eng_payload),
+                );
+
 
                 const res_data: engineResponse = {
                     request_id,
@@ -1040,7 +1167,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
@@ -1050,6 +1178,17 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 `settlement-queue`,
                                 JSON.stringify(fill),
                             );
+
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
+                            );
+
 
                             market.bids.delete(matching_orders[i]);
                         }
@@ -1131,7 +1270,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 sell_order_id: order_id,
 
                                 fill_id: crypto.randomUUID(),
-                                created_at: Date.now()
+                                created_at: Date.now(),
+                                order_type: payload.side,
 
                             };
                             console.log({ fill });
@@ -1142,6 +1282,15 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 JSON.stringify(fill),
                             );
 
+                            const risk_eng_payload = {
+                                fill: fill,
+                                command: "fill-order"
+                            };
+
+                            riskEngPubclient.lPush(
+                                `matching-to-risk-pub-queue`,
+                                JSON.stringify(risk_eng_payload),
+                            );
                             market.bids.delete(matching_orders[i]);
                         }
                     }
@@ -1251,6 +1400,14 @@ const cancel_order = (payload: any, backend_id: string, request_id: string) => {
 
     publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
 
+    const risk_eng_payload = {
+        order: order,
+        command: "cancel-order"
+    };
+    riskEngPubclient.lPush(
+        `matching-to-risk-pub-queue`,
+        JSON.stringify(risk_eng_payload),
+    );
 
     const settle = { request_id, status: 'order cancelled', filled_quantity: 0, message: '', ...order };
 

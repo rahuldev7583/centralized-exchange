@@ -274,17 +274,28 @@ router.post('/api/exchange/future/order', async (req, res) => {
         //const res_data: any = await get_identifier('response-queue', true);
 
         console.log({
-            url: `response-queue-${BACKEND_ID}`
+            url: `response-queue-perp-${BACKEND_ID}`
         });
-        const res_data = await perpClient.brPop(`response-queue-perp-${BACKEND_ID}`, 2);
 
+        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 5);
         console.log({ res_data });
+        const parsed_res = res_data && JSON.parse(res_data?.element);
 
-        const parsed_res = JSON.parse(res_data?.element);
+        const risk_res_data = await perpClient.brPop(`response-queue-perp-${BACKEND_ID}`, 5);
 
-        console.log({ parsed_res });
+        console.log({ risk_res_data });
 
-        res.json({ message: 'order placed', data: parsed_res });
+        const parsed_risk_res = risk_res_data && JSON.parse(risk_res_data?.element);
+
+        console.log({ parsed_risk_res });
+
+        if (res_data) {
+            res.json({ message: 'order placed', data: parsed_res });
+        } else {
+            res.json({ message: 'order placed', data: parsed_risk_res });
+        }
+
+
 
     } catch (error) {
         console.log({ error });

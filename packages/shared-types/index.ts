@@ -35,6 +35,7 @@ export interface Fill {
     sell_order_id: string;
     fill_id: string;
     created_at: number;
+    order_type: string
 }
 
 export interface Order {
