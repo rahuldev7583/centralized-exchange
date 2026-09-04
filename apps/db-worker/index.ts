@@ -1,6 +1,6 @@
 import { createClient } from "redis";
-import { Prisma, prisma } from "database";
-import { priceToBigInt18, scaledDecimal } from "shared-types";
+import { prisma } from "database";
+import { scaledDecimal } from "shared-types";
 
 const client = createClient();
 
@@ -8,26 +8,15 @@ client.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-client.connect();
-console.log('Connected');
-
 const leverageclient = createClient();
-
 leverageclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-leverageclient.connect();
-console.log('leverage Connected');
-
 const leveragePubclient = createClient();
-
 leveragePubclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
-
-leveragePubclient.connect();
-console.log('leveragePubclient Connected');
 
 const STREAM_NAME = 'index-prices:events';
 const GROUP_NAME = 'index-prices-processors';
@@ -176,6 +165,14 @@ const createORUpdateLeverage = async (data: any) => {
 }
 
 while (1) {
+
+    await Promise.all([
+        client.connect(),
+        leverageclient.connect(),
+        leveragePubclient.connect()
+    ]);
+
+    console.log("All redis services connected successfully");
 
     await initializeStreamAndGroup();
 

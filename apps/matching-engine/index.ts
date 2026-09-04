@@ -29,52 +29,31 @@ export interface engineResponse {
     filled_quantity: number,
     data?: any
 }
-const client = createClient();
 
+const client = createClient();
 client.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-client.connect();
-console.log('Connected');
-
 const publishclient = createClient();
-
 publishclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-publishclient.connect();
-
-console.log('publish Connected');
-
 const dbWorkerclient = createClient();
-
 dbWorkerclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-dbWorkerclient.connect();
-
-console.log('dbWorkerclient Connected');
-
 const riskEngclient = createClient();
-
 riskEngclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-riskEngclient.connect();
-console.log('riskEngclient Connected');
-
 const riskEngPubclient = createClient();
-
 riskEngPubclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
-
-riskEngPubclient.connect();
-console.log('riskEngPubclient Connected');
 
 //incoming-request => client => for receiving request from api to matching engine
 
@@ -673,7 +652,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                         symbol: payload.symbol,
                         created_at: Date.now(),
                     },
-                    command: "add-order"
+                    command: "create-order"
                 };
 
                 riskEngPubclient.lPush(
@@ -1060,7 +1039,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                         symbol: payload.symbol,
                         created_at: Date.now(),
                     },
-                    command: "add-order"
+                    command: "create-order"
                 };
 
                 riskEngPubclient.lPush(
@@ -1512,6 +1491,16 @@ const create_asset = (payload: any, backend_id: string, request_id: string) => {
 let engine_status: engineStatus = 'down'
 
 while (1) {
+
+    await Promise.all([
+        client.connect(),
+        publishclient.connect(),
+        dbWorkerclient.connect(),
+        riskEngclient.connect(),
+        riskEngPubclient.connect()
+    ])
+
+    console.log("All redis services connected successfully");
 
     if (engine_status == 'down') {
         engine_status = 'pending'

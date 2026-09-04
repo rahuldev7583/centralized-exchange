@@ -1,11 +1,12 @@
 import { Prisma, prisma } from "database";
+import type { Decimal } from "database/generated/prisma/internal/prismaNamespace";
 export type side = 'buy' | 'sell';
 export type type = 'limit' | 'market';
 export type order_status = 'filled' | 'partially_filled' | 'cancelled';
 
 export interface Balance {
-    available: number;
-    locked: number;
+    available: Decimal;
+    locked: Decimal;
     asset_id: string,
     user_id: string
 }
