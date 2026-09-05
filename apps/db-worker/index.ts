@@ -18,6 +18,12 @@ leveragePubclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
+const fundingClient = createClient();
+
+fundingClient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+
 const STREAM_NAME = 'index-prices:events';
 const GROUP_NAME = 'index-prices-processors';
 const CONSUMER_NAME = `worker-${process.pid}`;
@@ -164,12 +170,103 @@ const createORUpdateLeverage = async (data: any) => {
     }
 }
 
+const settleFunding = async (payload: any) => {
+    const asts = payload.fill.symbol.split(/_/);
+    console.log({ asts });
+
+    const base_ast = await prisma.asset.findUnique({
+        where: {
+            symbol: asts[0]
+        }
+    })
+    const quote_ast = await prisma.asset.findUnique({
+        where: {
+            symbol: asts[1]
+        }
+    })
+    if (!base_ast || !quote_ast) {
+        return;
+    }
+
+    const funding_fee = payload.funding_fee;
+    const funding_rate = payload.funding_rate;
+    const fill = payload.fill;
+
+    if (Number(funding_rate) > 0) {
+        //long of this postion will pay short
+        //decrease the usdc from buy user and increase of sell user
+
+        await prisma.asset_balance.update({
+            where: {
+                user_id_assetId: {
+                    user_id: Number(fill.buy_user_id),
+                    assetId: quote_ast?.id
+                }
+            },
+            data: {
+                balance: {
+                    decrement: funding_fee
+                }
+            }
+        })
+
+        await prisma.asset_balance.update({
+            where: {
+                user_id_assetId: {
+                    user_id: Number(fill.sell_user_Id),
+                    assetId: quote_ast?.id
+                }
+            },
+            data: {
+                balance: {
+                    increment: funding_fee
+                }
+            }
+        })
+    } else if (Number(funding_rate) < 0) {
+        //short of position wil pay long
+
+        //decrease the usdc from sell user and increase of sell user
+
+        await prisma.asset_balance.update({
+            where: {
+                user_id_assetId: {
+                    user_id: Number(fill.sell_user_Id),
+                    assetId: quote_ast?.id
+                }
+            },
+            data: {
+                balance: {
+                    decrement: funding_fee
+                }
+            }
+        })
+
+        await prisma.asset_balance.update({
+            where: {
+                user_id_assetId: {
+                    user_id: Number(fill.buy_user_id),
+                    assetId: quote_ast?.id
+                }
+            },
+            data: {
+                balance: {
+                    increment: funding_fee
+                }
+            }
+        })
+    }
+    console.log("Funding fee collected and transfered");
+
+}
+
 while (1) {
 
     await Promise.all([
         client.connect(),
         leverageclient.connect(),
-        leveragePubclient.connect()
+        leveragePubclient.connect(),
+        fundingClient.connect()
     ]);
 
     console.log("All redis services connected successfully");
@@ -185,12 +282,21 @@ while (1) {
     const leverage_req = await leverageclient.brPop('leverage-db-queue', 2);
     console.log({ leverage_req });
 
-    if (!settlement_req && !leverage_req) {
+    const funding_req = await fundingClient.brPop('funding-to-db-queue', 2);
+    console.log({ funding_req });
+
+    if (!settlement_req && !leverage_req && !funding_req) {
         continue;
     }
 
     let parsed_settlement_req;
     let parsed_leverage_req;
+    let parsed_funding_req;
+
+    if (funding_req) {
+        parsed_funding_req = JSON.parse(funding_req.element);
+        console.log({ parsed_funding_req });
+    }
 
     if (settlement_req) {
         parsed_settlement_req = JSON.parse(settlement_req.element);
@@ -220,6 +326,12 @@ while (1) {
 
     //increase the buyer base asset balance (btc/eth)
     //increase the seller quote balance (usd)
+
+    if (parsed_funding_req) {
+        const payload = parsed_funding_req.payload;
+        console.log({ payload });
+        await settleFunding(payload);
+    }
 
     if (parsed_settlement_req) {
         const asts = parsed_settlement_req.symbol.split(/_/);
