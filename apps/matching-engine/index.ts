@@ -55,6 +55,11 @@ riskEngPubclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
+const liquidationClient = createClient();
+liquidationClient.on('error', (err: any) =>
+    console.log({ msg: 'Redis client error', err }),
+);
+
 //incoming-request => client => for receiving request from api to matching engine
 
 // response-queue-${backend_id}`, => publishclient=> for sending matching engine response back to api 
@@ -1497,7 +1502,8 @@ while (1) {
         publishclient.connect(),
         dbWorkerclient.connect(),
         riskEngclient.connect(),
-        riskEngPubclient.connect()
+        riskEngPubclient.connect(),
+        liquidationClient.connect()
     ])
 
     console.log("All redis services connected successfully");
@@ -1529,6 +1535,13 @@ while (1) {
 
         engine_status = 'ready'
     }
+
+    const liqudation_req = await client.brPop('liquidation-to-matching-eng', 2);
+
+    console.log({ liqudation_req });
+
+    const parsed_liquidation_req = liqudation_req && JSON.parse(liqudation_req.element);
+    console.log({ parsed_liquidation_req });
 
     const incoming_req = await client.brPop('incoming-request', 2);
 
@@ -1585,6 +1598,19 @@ while (1) {
     const incoming_risk_req = await riskEngclient.brPop("risk-to-matching-eng", 2);
 
     const parsed_risk_req = incoming_risk_req && JSON.parse(incoming_risk_req.element)
+
+    if (parsed_liquidation_req) {
+        console.log("force liquidation");
+        console.log({ parsed_liquidation_req });
+
+        if (parsed_risk_req.command == 'force-liquidate') {
+            create_order(
+                parsed_risk_req.payload,
+                parsed_req.BACKEND_ID,
+                parsed_req.request_id
+            );
+        }
+    }
 
     if (parsed_req) {
         if (parsed_req.command === 'create-order') {

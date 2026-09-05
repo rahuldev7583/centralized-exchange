@@ -179,7 +179,7 @@ export const shared_service = async () => {
                 const fill = parsed_req.fill;
 
                 console.log({ fill });
-                FILLS.push(fill);
+                SHARED_FILLS.push(fill);
 
                 const market = SHARED_ORDERBOOK.get(fill.symbol);
                 if (market) {
