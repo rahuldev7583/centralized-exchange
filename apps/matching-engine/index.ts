@@ -150,7 +150,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
             let filled_quantity: any = 0;
             let matching_orders: any = [];
-            console.log({ filled_quantityAT_118: filled_quantity });
+            console.log({ filled_quantityAT_153: filled_quantity });
 
             //  what if sort the order by price then loop through it, until got filled
 
@@ -167,7 +167,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                     //do the matching
                     lowest_price = k.price;
                     lowest_order = v;
-                    console.log({ filled_quantity_AT_133: filled_quantity, payload });
+                    console.log({ filled_quantity_AT_170: filled_quantity, payload });
 
                     if (filled_quantity < payload.quantity) {
                         //not fully filled yet
@@ -196,7 +196,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 type: payload.type,
                                 quantity: payload.quantity,
                                 filled_quantity: payload.quantity - filled_quantity,
-                                price: payload.price,
+                                price: lowest_price,
                                 symbol: payload.symbol,
 
                                 buy_user_id: payload.user_id,
@@ -258,7 +258,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 type: payload.type,
                                 quantity: payload.quantity,
                                 filled_quantity: current_ast.quantity,
-                                price: payload.price,
+                                //price: payload.price,
+                                price: lowest_price,
                                 symbol: payload.symbol,
 
                                 buy_user_id: payload.user_id,
@@ -337,7 +338,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
             const res_data: engineResponse = {
                 request_id,
                 order_id,
-                price: payload.price,
+                price: payload.price || 0,
                 filled_quantity: filled_quantity,
                 status: 'order accepted',
                 message: 'Order got filled'
@@ -428,7 +429,8 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 type: payload.type,
                                 quantity: payload.quantity,
                                 filled_quantity: payload.quantity - filled_quantity,
-                                price: payload.price,
+                                //price: payload.price,
+                                price: highest_price,
                                 symbol: payload.symbol,
 
                                 buy_user_id: payload.user_id,
@@ -483,14 +485,15 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 type: payload.type,
                                 quantity: payload.quantity,
                                 filled_quantity: current_ast.quantity,
-                                price: payload.price,
+                                //price: payload.price,
+                                price: highest_price,
                                 symbol: payload.symbol,
 
-                                buy_user_id: payload.user_id,
-                                sell_user_Id: current_ast.user_id,
+                                buy_user_id: current_ast.user_id,
+                                sell_user_Id: payload.user_id,
 
-                                buy_order_id: order_id,
-                                sell_order_id: current_ast.order_id,
+                                buy_order_id: current_ast.order_id,
+                                sell_order_id: order_id,
 
                                 fill_id: crypto.randomUUID(),
                                 created_at: Date.now(),
@@ -559,7 +562,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
             const res_data: engineResponse = {
                 request_id,
                 order_id,
-                price: payload.price,
+                price: payload.price || 0,
                 filled_quantity: filled_quantity,
                 status: 'order accepted',
                 message: 'Order got filled'
@@ -1495,17 +1498,16 @@ const create_asset = (payload: any, backend_id: string, request_id: string) => {
 
 let engine_status: engineStatus = 'down'
 
+await Promise.all([
+    client.connect(),
+    publishclient.connect(),
+    dbWorkerclient.connect(),
+    riskEngclient.connect(),
+    riskEngPubclient.connect(),
+    liquidationClient.connect()
+])
+
 while (1) {
-
-    await Promise.all([
-        client.connect(),
-        publishclient.connect(),
-        dbWorkerclient.connect(),
-        riskEngclient.connect(),
-        riskEngPubclient.connect(),
-        liquidationClient.connect()
-    ])
-
     console.log("All redis services connected successfully");
 
     if (engine_status == 'down') {
@@ -1603,7 +1605,7 @@ while (1) {
         console.log("force liquidation");
         console.log({ parsed_liquidation_req });
 
-        if (parsed_risk_req.command == 'force-liquidate') {
+        if (parsed_risk_req.command == 'forced-liquidate') {
             create_order(
                 parsed_risk_req.payload,
                 parsed_req.BACKEND_ID,

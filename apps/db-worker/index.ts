@@ -35,7 +35,6 @@ const CONSUMER_NAME = `worker-${process.pid}`;
 // leverage-res-queue => leveragePubClient => send back leverage update to api
 
 
-
 export const find_asset = async (asset: string) => {
     console.log("called find asset");
 
@@ -260,14 +259,14 @@ const settleFunding = async (payload: any) => {
 
 }
 
-while (1) {
+await Promise.all([
+    client.connect(),
+    leverageclient.connect(),
+    leveragePubclient.connect(),
+    fundingClient.connect()
+]);
 
-    await Promise.all([
-        client.connect(),
-        leverageclient.connect(),
-        leveragePubclient.connect(),
-        fundingClient.connect()
-    ]);
+while (1) {
 
     console.log("All redis services connected successfully");
 
@@ -367,9 +366,18 @@ while (1) {
             console.log("update asset balance");
             //i have to  update for base and quote asset balance for both buy and sell side
 
-            const buy_price = scaledDecimal(parsed_settlement_req.filled_quantity * parsed_settlement_req.price, Number(quote_ast.decimals));
+            const buyer_quote = await prisma.asset_balance.findFirst({
+                where: {
+                    user_id: parsed_settlement_req.buy_user_id,
+                    assetId: quote_ast?.id
+                }
+            });
+
+            const buy_price = parsed_settlement_req.type == "limit" ? scaledDecimal(parsed_settlement_req.filled_quantity * parsed_settlement_req.price, Number(quote_ast.decimals)) : buyer_quote?.locked_balance;
 
             console.log({ buy_price });
+
+            const buy_increment = parsed_settlement_req.type == "market" && parsed_settlement_req.order_type == "buy" ? buyer_quote?.locked_balance.minus(scaledDecimal(parsed_settlement_req.filled_quantity * parsed_settlement_req.price, Number(quote_ast.decimals))) : 0;
 
             const buy_user_quote = await prisma.asset_balance.update({
                 where: {
@@ -382,15 +390,15 @@ while (1) {
                     locked_balance: {
                         decrement: buy_price
                     },
-
+                    balance: {
+                        increment: buy_increment
+                    }
                 }
             })
 
             console.log({ buy_user_quote });
 
-
             const base_increment_buy = scaledDecimal(parsed_settlement_req.filled_quantity, Number(base_ast.decimals));
-
 
             const buy_user_base = await prisma.asset_balance.update({
                 where: {
@@ -412,6 +420,14 @@ while (1) {
 
             console.log({ ask_price });
 
+            const seller_base = await prisma.asset_balance.findFirst({
+                where: {
+                    user_id: parsed_settlement_req.sell_user_id,
+                    assetId: base_ast?.id
+                }
+            });
+
+            const increment_sell_base = parsed_settlement_req.type == 'market' && parsed_settlement_req.order_type == "sell" ? seller_base?.locked_balance.minus(parsed_settlement_req.filled_quantity) : 0;
 
             const sell_user_base = await prisma.asset_balance.update({
                 where: {
@@ -424,9 +440,11 @@ while (1) {
                     locked_balance: {
                         decrement: ask_price
                     },
-
+                    balance: {
+                        increment: increment_sell_base
+                    }
                 }
-            })
+            });
             console.log({ sell_user_base });
 
             const quote_bal = scaledDecimal(parsed_settlement_req.price * parsed_settlement_req.filled_quantity, Number(quote_ast.decimals));
@@ -449,6 +467,15 @@ while (1) {
                 }
             })
             console.log({ sell_user_quote });
+
+            await prisma.asset.update({
+                where: {
+                    id: base_ast.id
+                },
+                data: {
+                    last_traded_price: scaledDecimal(parsed_settlement_req.price, Number(base_ast.decimals))
+                }
+            })
         }
         else if (parsed_settlement_req.status == 'order cancelled') {
             //order cancel, caculated and update asset balances

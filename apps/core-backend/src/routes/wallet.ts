@@ -230,8 +230,8 @@ router.get('/api/wallet/balance', async (req, res) => {
 
             ast_balances.push({
                 asset: all_ast[i].name,
-                available: await readableDecimal(ast.balance, Number(all_ast[i].decimals)),
-                locked: await readableDecimal(ast.locked_balance, Number(all_ast[i].decimals))
+                available: readableDecimal(ast.balance, Number(all_ast[i].decimals)),
+                locked: readableDecimal(ast.locked_balance, Number(all_ast[i].decimals))
             });
         }
         res.json({ message: "Wallet and Asset fetched successfully", ast_balances })

@@ -27,7 +27,7 @@ enum Side { Buy = "buy", Sell = "sell" }
 export const Order = z.object({
     type: z.nativeEnum(Type),
     side: z.nativeEnum(Side),
-    quantity: z.number().min(1),
-    price: z.number().min(1),
+    quantity: z.number().min(0.0000001),
+    price: z.number().min(0.0000001).optional(),
     symbol: z.string().min(3).max(20)
 })

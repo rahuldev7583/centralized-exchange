@@ -68,25 +68,37 @@ router.post('/api/exchange/spot/order', async (req, res) => {
 
         console.log({ quote_bal, base_bal });
 
-
         if (!quote_bal || !base_bal) {
             return res.status(404).json({ message: "Not have valid wallet! Please fund you wallet" })
         }
 
-        const required_bal = await scaledDecimal(price * quantity, Number(quote_ast.decimals));
+        const user_quote_ast = await prisma.asset_balance.findFirst({
+            where: {
+                user_id: user_id,
+                assetId: quote_ast.id
+            }
+        });
+
+        const required_bal = type == "limit" ? scaledDecimal(price * quantity, Number(quote_ast.decimals)) : user_quote_ast?.balance;
         //for buy, check the currency balance, for sell check the asset balance
         //for buy lock the currency, for sell lock the asset
 
 
         console.log({ base_ast, quote_ast });
-        console.log({ required_bal });
 
-        const required_bal_sell = side == 'sell' ? await scaledDecimal(quantity, Number(base_ast.decimals)) : 0;
+        const user_base_ast = await prisma.asset_balance.findFirst({
+            where: {
+                user_id: user_id,
+                assetId: base_ast.id
+            }
+        });
+
+        const required_bal_sell = type == 'limit' ? scaledDecimal(quantity, Number(base_ast.decimals)) : user_base_ast?.balance;
 
 
-        if (side == 'buy' && Number(required_bal) >= (quote_bal.balance - quote_bal.locked_balance)) {
+        if (side == 'buy' && Number(required_bal) > quote_bal.balance) {
             return res.status(404).json({ message: 'Insufficient wallet balance' });
-        } else if (side == 'sell' && Number(required_bal_sell) >= Number(base_bal.balance) - Number(base_bal.locked_balance)) {
+        } else if (side == 'sell' && Number(required_bal_sell) > Number(base_bal.balance)) {
             return res.status(404).json({ message: 'Insufficient asset balance' });
         }
 
@@ -144,10 +156,10 @@ router.post('/api/exchange/spot/order', async (req, res) => {
 
         //The engine must reply to message.responseQueue and include the same correlationId.
 
-        const payload_price = new Prisma.Decimal(price);
+        const payload_price = new Prisma.Decimal(price || 0);
         const payload_quantity = new Prisma.Decimal(quantity);
 
-        const payload: any = { type, quantity: payload_quantity, price: payload_price, symbol, side, user_id };
+        const payload: any = type == 'limit' ? { type, quantity: payload_quantity, price: payload_price, symbol, side, user_id } : { type, quantity: payload_quantity, symbol, side, user_id };
 
 
         await client.lPush(
@@ -163,7 +175,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 0);
+        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 2);
         console.log({ res_data });
 
         if (!res_data) {
@@ -277,11 +289,11 @@ router.post('/api/exchange/future/order', async (req, res) => {
             url: `response-queue-perp-${BACKEND_ID}`
         });
 
-        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 5);
+        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 2);
         console.log({ res_data });
         const parsed_res = res_data && JSON.parse(res_data?.element);
 
-        const risk_res_data = await perpClient.brPop(`response-queue-perp-${BACKEND_ID}`, 5);
+        const risk_res_data = await perpClient.brPop(`response-queue-perp-${BACKEND_ID}`, 2);
 
         console.log({ risk_res_data });
 

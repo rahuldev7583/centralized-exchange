@@ -16,7 +16,9 @@ const liquidation_check = async () => {
 
     SHARED_FILLS.map(async (f) => {
         console.log({ f });
-        const ast = ASSETS.find(a => a.symbol == f.symbol);
+
+        const asts = f.symbol.split(/_/);
+        const ast = ASSETS.find(a => a.symbol == asts[0]);
         console.log({ ast });
 
         const ast_price = PRICES.get(ast.symbol);

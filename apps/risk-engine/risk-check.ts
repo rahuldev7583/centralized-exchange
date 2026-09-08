@@ -12,7 +12,6 @@ export type engineStatus = | 'pending' | 'ready' | 'down';
 
 //leverage-db-queue => leveragePubClient => for sending leverage res to db worker from risk engine
 
-
 let risk_engine_status: engineStatus = 'down'
 
 const client = createClient();
@@ -55,6 +54,7 @@ export const risk_check_service = async () => {
         client.connect(),
         publishclient.connect(),
         leverageClient.connect(),
+        leveragePubClient.connect(),
         priceStreamClient.connect(),
         matchineEngClient.connect(),
         riskToAPIclient.connect()
@@ -73,9 +73,9 @@ export const risk_check_service = async () => {
         const leverage_req = await leverageClient.brPop('leverage-req-queue', 2);
         console.log({ leverage_req });
 
-        if (!risk_engine_req && !leverage_req) {
-            continue;
-        }
+        //if (!risk_engine_req && !leverage_req) {
+        //    continue;
+        //}
 
         let parsed_req;
         let parsed_leverage_req;
@@ -117,6 +117,8 @@ export const risk_check_service = async () => {
                 const quote_ast_sym = parsed_req.payload.symbol.split("_")[1];
                 console.log({ PRICES });
 
+                const quote_ast = ASSETS.find(a => a.symbol == quote_ast_sym);
+
                 const base_price = base_ast && PRICES.get(base_ast_sym);
 
                 console.log({ base_price });
@@ -140,7 +142,7 @@ export const risk_check_service = async () => {
                 console.log({ lev_limit });
 
 
-                const initial_margin = position_notional_val && position_notional_val.mul(lev_limit)
+                const initial_margin = position_notional_val && position_notional_val.div(lev_limit)
 
                 console.log({ initial_margin });
 
@@ -149,11 +151,15 @@ export const risk_check_service = async () => {
                     initial_margin: initial_margin
                 };
 
-                const user_ast_bal = BALANCES.find(u => u.user_id == parsed_req.payload.user_id);
+                const user_ast_bal = BALANCES.find(u => u.user_id == parsed_req.payload.user_id && u.assetId == quote_ast.id);
 
-                console.log({ user_ast_bal, initial_margin });
+                console.log({ user_ast_bal });
 
-                if (user_ast_bal && user_ast_bal.balance >= initial_margin) {
+                const balance = user_ast_bal.balance;
+
+                const valid = balance >= initial_margin;
+
+                if (Number(balance) >= Number(initial_margin)) {
                     console.log("Risk engine approved this order, move to matching engine");
 
                     await matchineEngClient.lPush("risk-to-matching-eng", JSON.stringify({
@@ -174,7 +180,7 @@ export const risk_check_service = async () => {
                     const res_data = {
                         request_id: parsed_req.request_id,
                         order_id: parsed_req.order_id,
-                        payload: '',
+                        payload: { initial_margin, balance: user_ast_bal.balance },
                         status: 'order rejected',
                         message: 'do not have engough margin to open position'
                     };
