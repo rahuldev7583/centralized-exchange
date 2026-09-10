@@ -1,6 +1,7 @@
 import { createClient } from 'redis';
 import { LEVERAGES, PRICES, ASSETS, BALANCES } from "./shared-state";
 import { Decimal } from "database/generated/prisma/internal/prismaNamespace";
+import { prisma } from 'database';
 
 export type engineStatus = | 'pending' | 'ready' | 'down';
 
@@ -105,94 +106,118 @@ export const risk_check_service = async () => {
 
         if (parsed_req) {
             if (parsed_req.command == 'create-order') {
-                console.log({ parsed_req });
+                try {
 
-                const base_ast_sym = parsed_req.payload.symbol.split("_")[0];
+                    console.log({ parsed_req });
 
-                console.log({ ASSETS });
+                    const base_ast_sym = parsed_req.payload.symbol.split("_")[0];
 
-                const base_ast = ASSETS.find(a => a.symbol == base_ast_sym);
-                console.log({ base_ast });
+                    console.log({ ASSETS });
 
-                const quote_ast_sym = parsed_req.payload.symbol.split("_")[1];
-                console.log({ PRICES });
+                    const base_ast = ASSETS.find(a => a.symbol == base_ast_sym);
+                    console.log({ base_ast });
 
-                const quote_ast = ASSETS.find(a => a.symbol == quote_ast_sym);
+                    const quote_ast_sym = parsed_req.payload.symbol.split("_")[1];
+                    console.log({ PRICES });
 
-                const base_price = base_ast && PRICES.get(base_ast_sym);
+                    const quote_ast: any = ASSETS.find(a => a.symbol == quote_ast_sym);
 
-                console.log({ base_price });
+                    const base_price = base_ast && PRICES.get(base_ast_sym);
 
-                const user_leverage = LEVERAGES.find(l => l.user_id === parsed_req.payload.user_id);
-                console.log({ user_leverage });
+                    console.log({ base_price });
 
-                const mark_price = base_price?.mark_price;
+                    const user_leverage = LEVERAGES.find(l => l.user_id === parsed_req.payload.user_id);
+                    console.log({ user_leverage });
 
-                console.log({ mark_price });
+                    const mark_price = base_price?.mark_price;
 
-
-                const position_notional = new Decimal(parsed_req.payload.quantity);
-
-                console.log({ position_notional });
-
-                const position_notional_val = mark_price && position_notional.mul(mark_price)
-
-                const lev_limit = new Decimal(user_leverage.limit);
-
-                console.log({ lev_limit });
+                    console.log({ mark_price });
 
 
-                const initial_margin = position_notional_val && position_notional_val.div(lev_limit)
+                    const position_notional = new Decimal(parsed_req.payload.quantity);
 
-                console.log({ initial_margin });
+                    console.log({ position_notional });
 
-                const payload = {
-                    ...parsed_req.payload,
-                    initial_margin: initial_margin
-                };
+                    const position_notional_val = mark_price && position_notional.mul(mark_price)
 
-                const user_ast_bal = BALANCES.find(u => u.user_id == parsed_req.payload.user_id && u.assetId == quote_ast.id);
+                    const lev_limit = new Decimal(user_leverage?.limit);
 
-                console.log({ user_ast_bal });
+                    console.log({ lev_limit });
 
-                const balance = user_ast_bal.balance;
 
-                const valid = balance >= initial_margin;
+                    const initial_margin = position_notional_val && position_notional_val.div(lev_limit)
 
-                if (Number(balance) >= Number(initial_margin)) {
-                    console.log("Risk engine approved this order, move to matching engine");
+                    console.log({ initial_margin });
 
-                    await matchineEngClient.lPush("risk-to-matching-eng", JSON.stringify({
-                        BACKEND_ID: parsed_req.BACKEND_ID,
-                        request_id: parsed_req.request_id,
-                        payload,
-                        command: 'create-order',
-                    }))
-
-                } else {
-                    console.log("Risk engine rejected order, as not have enough margin to open this position, api endpoint should get response back");
-
-                    //const init_margin = new Prisma.Decimal(initial_margin);
-                    //const margin = readableDecimal(init_margin, quote_ast.decimals);
-
-                    //console.log({ init_margin, margin, initial_margin });
-
-                    const res_data = {
-                        request_id: parsed_req.request_id,
-                        order_id: parsed_req.order_id,
-                        payload: { initial_margin, balance: user_ast_bal.balance },
-                        status: 'order rejected',
-                        message: 'do not have engough margin to open position'
+                    const payload = {
+                        ...parsed_req.payload,
+                        initial_margin: initial_margin
                     };
-                    console.log({ url: `response-queue-perp-${parsed_req.BACKEND_ID}` });
 
-                    riskToAPIclient.lPush(
-                        `response-queue-perp-${parsed_req.BACKEND_ID}`,
-                        JSON.stringify(res_data),
-                    );
+                    const user_ast_bal = BALANCES.find(u => u.user_id == parsed_req.payload.user_id && u.assetId == quote_ast.id);
+
+                    console.log({ user_ast_bal });
+
+                    const balance = user_ast_bal.balance;
+
+                    const valid = balance >= initial_margin;
+
+                    if (Number(balance) >= Number(initial_margin)) {
+                        console.log("Risk engine approved this order, move to matching engine");
+
+
+                        await prisma.asset_balance.update({
+                            where: {
+                                user_id_assetId: {
+                                    user_id: parsed_req.payload.user_id,
+                                    assetId: quote_ast.id
+                                }
+                            }, data: {
+                                balance: {
+                                    decrement: initial_margin
+                                },
+                                locked_balance: {
+                                    increment: initial_margin
+                                }
+                            }
+                        })
+
+                        await matchineEngClient.lPush("risk-to-matching-eng", JSON.stringify({
+                            BACKEND_ID: parsed_req.BACKEND_ID,
+                            request_id: parsed_req.request_id,
+                            payload,
+                            command: 'create-order',
+                        }))
+
+                    } else {
+                        console.log("Risk engine rejected order, as not have enough margin to open this position, api endpoint should get response back");
+
+                        //const init_margin = new Prisma.Decimal(initial_margin);
+                        //const margin = readableDecimal(init_margin, quote_ast.decimals);
+
+                        //console.log({ init_margin, margin, initial_margin });
+
+                        const res_data = {
+                            request_id: parsed_req.request_id,
+                            order_id: parsed_req.order_id,
+                            payload: { initial_margin, balance: user_ast_bal.balance },
+                            status: 'order rejected',
+                            message: 'do not have engough margin to open position'
+                        };
+                        console.log({ url: `response-queue-perp-${parsed_req.BACKEND_ID}` });
+
+                        riskToAPIclient.lPush(
+                            `response-queue-perp-${parsed_req.BACKEND_ID}`,
+                            JSON.stringify(res_data),
+                        );
+
+                    }
+
+
+                } catch (error) {
+                    console.log({ error });
 
                 }
-
             }
         }
 

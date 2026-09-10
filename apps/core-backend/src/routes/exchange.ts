@@ -83,7 +83,6 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         //for buy, check the currency balance, for sell check the asset balance
         //for buy lock the currency, for sell lock the asset
 
-
         console.log({ base_ast, quote_ast });
 
         const user_base_ast = await prisma.asset_balance.findFirst({
@@ -175,7 +174,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 2);
+        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 4);
         console.log({ res_data });
 
         if (!res_data) {
@@ -289,11 +288,11 @@ router.post('/api/exchange/future/order', async (req, res) => {
             url: `response-queue-perp-${BACKEND_ID}`
         });
 
-        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 2);
+        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 4);
         console.log({ res_data });
         const parsed_res = res_data && JSON.parse(res_data?.element);
 
-        const risk_res_data = await perpClient.brPop(`response-queue-perp-${BACKEND_ID}`, 2);
+        const risk_res_data = await perpClient.brPop(`response-queue-perp-${BACKEND_ID}`, 4);
 
         console.log({ risk_res_data });
 
@@ -431,6 +430,6 @@ router.post('/api/exchange/leverage', async (req, res) => {
     console.log({ parsed_res });
 
     res.json({ message: parsed_res.status, data: parsed_res });
-})
+});
 
 export default router;

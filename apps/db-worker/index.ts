@@ -333,7 +333,7 @@ while (1) {
     }
 
     if (parsed_settlement_req) {
-        const asts = parsed_settlement_req.symbol.split(/_/);
+        const asts = parsed_settlement_req?.payload?.symbol.split(/_/);
         console.log({ asts });
 
         //const base_ast = await find_asset(asts[0]);
@@ -343,13 +343,13 @@ while (1) {
             where: {
                 symbol: asts[0]
             }
-        })
+        });
 
         const quote_ast = await prisma.asset.findFirstOrThrow({
             where: {
                 symbol: asts[1]
             }
-        })
+        });
         console.log({ base_ast, quote_ast });
 
 
@@ -358,124 +358,129 @@ while (1) {
             //invalid asset
             continue;
         }
-        const required_bal = parsed_settlement_req.price * parsed_settlement_req.quantity;
 
 
-        if (parsed_settlement_req.filled_quantity > 0) {
+        if (parsed_settlement_req.fill.filled_quantity > 0) {
             //some order were filled, calculate and update asset balances
             console.log("update asset balance");
             //i have to  update for base and quote asset balance for both buy and sell side
 
-            const buyer_quote = await prisma.asset_balance.findFirst({
-                where: {
-                    user_id: parsed_settlement_req.buy_user_id,
-                    assetId: quote_ast?.id
-                }
-            });
+            if (parsed_settlement_req.request_type == 'perp') {
 
-            const buy_price = parsed_settlement_req.type == "limit" ? scaledDecimal(parsed_settlement_req.filled_quantity * parsed_settlement_req.price, Number(quote_ast.decimals)) : buyer_quote?.locked_balance;
+                //TODO
 
-            console.log({ buy_price });
-
-            const buy_increment = parsed_settlement_req.type == "market" && parsed_settlement_req.order_type == "buy" ? buyer_quote?.locked_balance.minus(scaledDecimal(parsed_settlement_req.filled_quantity * parsed_settlement_req.price, Number(quote_ast.decimals))) : 0;
-
-            const buy_user_quote = await prisma.asset_balance.update({
-                where: {
-                    user_id_assetId: {
-                        user_id: parsed_settlement_req.buy_user_id,
+            } else {
+                const buyer_quote = await prisma.asset_balance.findFirst({
+                    where: {
+                        user_id: parsed_settlement_req.fill.buy_user_id,
                         assetId: quote_ast?.id
                     }
-                },
-                data: {
-                    locked_balance: {
-                        decrement: buy_price
+                });
+
+                const buy_price = parsed_settlement_req.fill.type == "limit" ? scaledDecimal(parsed_settlement_req.fill.filled_quantity * parsed_settlement_req.fill.price, Number(quote_ast.decimals)) : buyer_quote?.locked_balance;
+
+                console.log({ buy_price });
+
+                const buy_increment = parsed_settlement_req.fill.type == "market" && parsed_settlement_req.fill.order_type == "buy" ? buyer_quote?.locked_balance.minus(scaledDecimal(parsed_settlement_req.fill.filled_quantity * parsed_settlement_req.fill.price, Number(quote_ast.decimals))) : 0;
+
+                const buy_user_quote = await prisma.asset_balance.update({
+                    where: {
+                        user_id_assetId: {
+                            user_id: parsed_settlement_req.fill.buy_user_id,
+                            assetId: quote_ast?.id
+                        }
                     },
-                    balance: {
-                        increment: buy_increment
+                    data: {
+                        locked_balance: {
+                            decrement: buy_price
+                        },
+                        balance: {
+                            increment: buy_increment
+                        }
                     }
-                }
-            })
+                })
 
-            console.log({ buy_user_quote });
+                console.log({ buy_user_quote });
 
-            const base_increment_buy = scaledDecimal(parsed_settlement_req.filled_quantity, Number(base_ast.decimals));
+                const base_increment_buy = scaledDecimal(parsed_settlement_req.fill.filled_quantity, Number(base_ast.decimals));
 
-            const buy_user_base = await prisma.asset_balance.update({
-                where: {
-                    user_id_assetId: {
-                        user_id: parsed_settlement_req.buy_user_id,
+                const buy_user_base = await prisma.asset_balance.update({
+                    where: {
+                        user_id_assetId: {
+                            user_id: parsed_settlement_req.fill.buy_user_id,
+                            assetId: base_ast?.id
+                        }
+                    },
+                    data: {
+                        balance: {
+                            increment: base_increment_buy
+                        },
+
+                    }
+                })
+                console.log({ buy_user_base });
+
+                const ask_price = scaledDecimal(parsed_settlement_req.fill.filled_quantity, Number(base_ast.decimals));
+
+                console.log({ ask_price });
+
+                const seller_base = await prisma.asset_balance.findFirst({
+                    where: {
+                        user_id: parsed_settlement_req.fill.sell_user_id,
                         assetId: base_ast?.id
                     }
-                },
-                data: {
-                    balance: {
-                        increment: base_increment_buy
+                });
+
+                const increment_sell_base = parsed_settlement_req.fill.type == 'market' && parsed_settlement_req.fill.order_type == "sell" ? seller_base?.locked_balance.minus(parsed_settlement_req.fill.filled_quantity) : 0;
+
+                const sell_user_base = await prisma.asset_balance.update({
+                    where: {
+                        user_id_assetId: {
+                            user_id: parsed_settlement_req.fill.sell_user_Id,
+                            assetId: base_ast?.id
+                        }
                     },
-
-                }
-            })
-            console.log({ buy_user_base });
-
-            const ask_price = scaledDecimal(parsed_settlement_req.filled_quantity, Number(base_ast.decimals));
-
-            console.log({ ask_price });
-
-            const seller_base = await prisma.asset_balance.findFirst({
-                where: {
-                    user_id: parsed_settlement_req.sell_user_id,
-                    assetId: base_ast?.id
-                }
-            });
-
-            const increment_sell_base = parsed_settlement_req.type == 'market' && parsed_settlement_req.order_type == "sell" ? seller_base?.locked_balance.minus(parsed_settlement_req.filled_quantity) : 0;
-
-            const sell_user_base = await prisma.asset_balance.update({
-                where: {
-                    user_id_assetId: {
-                        user_id: parsed_settlement_req.sell_user_Id,
-                        assetId: base_ast?.id
+                    data: {
+                        locked_balance: {
+                            decrement: ask_price
+                        },
+                        balance: {
+                            increment: increment_sell_base
+                        }
                     }
-                },
-                data: {
-                    locked_balance: {
-                        decrement: ask_price
+                });
+                console.log({ sell_user_base });
+
+                const quote_bal = scaledDecimal(parsed_settlement_req.fill.price * parsed_settlement_req.fill.filled_quantity, Number(quote_ast.decimals));
+
+                console.log({ quote_bal });
+
+
+                const sell_user_quote = await prisma.asset_balance.update({
+                    where: {
+                        user_id_assetId: {
+                            user_id: parsed_settlement_req.fill.sell_user_Id,
+                            assetId: quote_ast?.id
+                        }
                     },
-                    balance: {
-                        increment: increment_sell_base
+                    data: {
+                        balance: {
+                            increment: quote_bal
+                        }
+
                     }
-                }
-            });
-            console.log({ sell_user_base });
+                })
+                console.log({ sell_user_quote });
 
-            const quote_bal = scaledDecimal(parsed_settlement_req.price * parsed_settlement_req.filled_quantity, Number(quote_ast.decimals));
-
-            console.log({ quote_bal });
-
-
-            const sell_user_quote = await prisma.asset_balance.update({
-                where: {
-                    user_id_assetId: {
-                        user_id: parsed_settlement_req.sell_user_Id,
-                        assetId: quote_ast?.id
+                await prisma.asset.update({
+                    where: {
+                        id: base_ast.id
+                    },
+                    data: {
+                        last_traded_price: scaledDecimal(parsed_settlement_req.fill.price, Number(base_ast.decimals))
                     }
-                },
-                data: {
-                    balance: {
-                        increment: quote_bal
-                    }
-
-                }
-            })
-            console.log({ sell_user_quote });
-
-            await prisma.asset.update({
-                where: {
-                    id: base_ast.id
-                },
-                data: {
-                    last_traded_price: scaledDecimal(parsed_settlement_req.price, Number(base_ast.decimals))
-                }
-            })
+                })
+            }
         }
         else if (parsed_settlement_req.status == 'order cancelled') {
             //order cancel, caculated and update asset balances
@@ -484,45 +489,50 @@ while (1) {
 
             //if it's sell order then decrease user's base asset balnce and increase base asset balance
 
-            if (parsed_settlement_req.side == "buy") {
+            try {
+                if (parsed_settlement_req.side == "buy") {
 
-                const quote_price = scaledDecimal(parsed_settlement_req.quantity * parsed_settlement_req.price, Number(quote_ast.decimals));
+                    const quote_price = scaledDecimal(parsed_settlement_req.quantity * parsed_settlement_req.price, Number(quote_ast.decimals));
 
-                await prisma.asset_balance.update({
-                    where: {
-                        user_id_assetId: {
-                            user_id: parsed_settlement_req.user_id,
-                            assetId: quote_ast?.id
-                        }
-                    },
-                    data: {
-                        locked_balance: {
-                            decrement: quote_price
+                    await prisma.asset_balance.update({
+                        where: {
+                            user_id_assetId: {
+                                user_id: parsed_settlement_req.user_id,
+                                assetId: quote_ast?.id
+                            }
                         },
-                        balance: {
-                            increment: quote_price
+                        data: {
+                            locked_balance: {
+                                decrement: quote_price
+                            },
+                            balance: {
+                                increment: quote_price
+                            }
                         }
-                    }
-                })
-            } else if (parsed_settlement_req.side == 'sell') {
-                const base_price = scaledDecimal(parsed_settlement_req.quantity, Number(base_ast.decimals));
+                    })
+                } else if (parsed_settlement_req.side == 'sell') {
+                    const base_price = scaledDecimal(parsed_settlement_req.quantity, Number(base_ast.decimals));
 
-                await prisma.asset_balance.update({
-                    where: {
-                        user_id_assetId: {
-                            user_id: parsed_settlement_req.user_id,
-                            assetId: base_ast?.id
-                        }
-                    },
-                    data: {
-                        locked_balance: {
-                            decrement: base_price
+                    await prisma.asset_balance.update({
+                        where: {
+                            user_id_assetId: {
+                                user_id: parsed_settlement_req.user_id,
+                                assetId: base_ast?.id
+                            }
                         },
-                        balance: {
-                            increment: base_price
+                        data: {
+                            locked_balance: {
+                                decrement: base_price
+                            },
+                            balance: {
+                                increment: base_price
+                            }
                         }
-                    }
-                })
+                    })
+                }
+            } catch (error) {
+                console.log({ error });
+
             }
         }
         console.log("asset_balance updated");
@@ -531,6 +541,5 @@ while (1) {
     if (parsed_leverage_req) {
         await createORUpdateLeverage(parsed_leverage_req);
     }
-
 }
 

@@ -84,7 +84,7 @@ liquidationClient.on('error', (err: any) =>
 //const BALANCES: any = [];
 //const ORDERS: any = [];
 
-const create_order = (payload: any, backend_id: string, request_id: string) => {
+const create_order = (payload: any, backend_id: string, request_id: string, request_type?: string) => {
     console.log({ payload });
     console.log({ ORDERBOOK });
     const order_id: string = crypto.randomUUID();
@@ -116,8 +116,6 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
     //for buy => lowest available price on orderbook
     //for sell => highest available price on orderbook
-
-
 
     if (payload.type == 'market') {
         //execute immediately
@@ -190,8 +188,6 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                             const current_ast: any = market.asks.get(v);
                             console.log({ current_ast });
 
-                            filled_quantity += payload.quantity - filled_quantity;
-
                             const fill: Fill = {
                                 type: payload.type,
                                 quantity: payload.quantity,
@@ -212,6 +208,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                             };
                             console.log({ fill });
 
+                            filled_quantity += payload.quantity - filled_quantity;
 
                             //dbWorkerclient.lPush(
                             //    `settlement-queue`,
@@ -221,7 +218,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill, payload),
+                                JSON.stringify({ fill, payload, request_type: request_type }),
                             );
 
                             const risk_eng_payload = {
@@ -237,8 +234,6 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 ...k,
                                 quantity: k.quantity - (payload.quantity - filled_quantity),
                             });
-
-
 
                         } else if (k.quantity <= payload.quantity - filled_quantity) {
                             //remove from orderbook, increase the fill
@@ -280,7 +275,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill, payload),
+                                JSON.stringify({ fill, payload, request_type }),
                             );
 
                             const risk_eng_payload = {
@@ -433,11 +428,11 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 price: highest_price,
                                 symbol: payload.symbol,
 
-                                buy_user_id: payload.user_id,
-                                sell_user_Id: current_ast.user_id,
+                                buy_user_id: current_ast.user_id,
+                                sell_user_Id: payload.user_id,
 
-                                buy_order_id: order_id,
-                                sell_order_id: current_ast.order_id,
+                                buy_order_id: current_ast.order_id,
+                                sell_order_id: order_id,
 
                                 fill_id: crypto.randomUUID(),
                                 created_at: Date.now(),
@@ -449,7 +444,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill, payload),
+                                JSON.stringify({ fill, payload, request_type }),
                             );
 
                             const risk_eng_payload = {
@@ -462,10 +457,10 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 JSON.stringify(risk_eng_payload),
                             );
 
-                            market.asks.set(v, {
+                            market.bids.set(v, {
                                 ...k,
                                 quantity: k.quantity - (payload.quantity - filled_quantity),
-                            });
+                            })
                         } else if (k.quantity <= payload.quantity - filled_quantity) {
                             //remove from orderbook, increase the fill
 
@@ -505,7 +500,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill),
+                                JSON.stringify({ fill, payload, request_type }),
                             );
                             const risk_eng_payload = {
                                 fill: fill,
@@ -516,8 +511,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
                                 JSON.stringify(risk_eng_payload),
                             );
 
-
-                            market.asks.delete(v);
+                            market.bids.delete(v);
                         }
                     }
                 } else {
@@ -780,7 +774,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill),
+                                JSON.stringify({ fill, payload, request_type }),
                             );
                             riskEngPubclient.lPush(
                                 `matching-to-risk-pub-queue`,
@@ -829,7 +823,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill),
+                                JSON.stringify({ fill, payload, request_type }),
                             );
                             const risk_eng_payload = {
                                 fill: fill,
@@ -928,7 +922,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill),
+                                JSON.stringify({ fill, payload, request_type }),
                             );
                             const risk_eng_payload = {
                                 fill: fill,
@@ -1163,7 +1157,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill),
+                                JSON.stringify({ fill, payload, request_type }),
                             );
 
                             const risk_eng_payload = {
@@ -1266,7 +1260,7 @@ const create_order = (payload: any, backend_id: string, request_id: string) => {
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify(fill),
+                                JSON.stringify({ fill, payload, request_type }),
                             );
 
                             const risk_eng_payload = {
@@ -1396,7 +1390,7 @@ const cancel_order = (payload: any, backend_id: string, request_id: string) => {
         JSON.stringify(risk_eng_payload),
     );
 
-    const settle = { request_id, status: 'order cancelled', filled_quantity: 0, message: '', ...order };
+    const settle = { request_id, status: 'order cancelled', filled_quantity: 0, message: '', ...order, fill: {}, payload: { symbol: order.symbol } };
 
     dbWorkerclient.lPush(
         `settlement-queue`,
@@ -1605,11 +1599,11 @@ while (1) {
         console.log("force liquidation");
         console.log({ parsed_liquidation_req });
 
-        if (parsed_risk_req.command == 'forced-liquidate') {
+        if (parsed_liquidation_req.command == 'forced-liquidate') {
             create_order(
-                parsed_risk_req.payload,
-                parsed_req.BACKEND_ID,
-                parsed_req.request_id
+                parsed_liquidation_req.payload,
+                parsed_liquidation_req.BACKEND_ID,
+                parsed_liquidation_req.request_id
             );
         }
     }
@@ -1667,6 +1661,7 @@ while (1) {
                 { ...parsed_risk_req.payload, price, quantity },
                 parsed_risk_req.BACKEND_ID,
                 parsed_risk_req.request_id,
+                "perp"
             );
         }
     }
