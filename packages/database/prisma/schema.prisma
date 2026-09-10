@@ -48,6 +48,9 @@ model User {
     orders     Order[]
     asset      Asset_balance[]
     leverage   leverage[]
+
+    buyFill  Fill[] @relation("BuyFill")
+    sellFill Fill[] @relation("SellFill")
 }
 
 model Asset {
@@ -122,13 +125,13 @@ model Order {
     created_at DateTime @default(now())
     updated_at DateTime @updatedAt
 
-    market      Market @relation(fields: [marketId], references: [id])
-    user        User   @relation(fields: [userUser_id], references: [user_id])
-    marketId    Int
-    userUser_id Int
+    market    Market @relation(fields: [market_id], references: [id])
+    user      User   @relation(fields: [user_id], references: [user_id])
+    market_id Int
+    user_id   Int
 
     entry_price    Decimal @db.Decimal(78, 0)
-    initial_margin Decimal @db.Decimal(78, 0)
+    initial_margin Decimal @default(0) @db.Decimal(78, 0)
 
     ask_fill Fill[] @relation("AskOrder")
     bid_fill Fill[] @relation("BidOrder")
@@ -139,6 +142,7 @@ model Fill {
     type     String
     price    Decimal @db.Decimal(78, 0)
     quantity Int
+    symbol   String
     status   String
 
     ask_order_id Order @relation("AskOrder", fields: [ask_orderId], references: [id])
@@ -149,6 +153,12 @@ model Fill {
 
     ask_orderId Int
     bid_orderId Int
+
+    sell_user    User @relation("SellFill", fields: [sell_user_id], references: [user_id])
+    sell_user_id Int
+
+    buy_user    User @relation("BuyFill", fields: [buy_user_id], references: [user_id])
+    buy_user_id Int
 }
 
 model leverage {
