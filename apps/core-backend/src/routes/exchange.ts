@@ -400,10 +400,42 @@ router.delete('/api/exchange/spot/order/:order_id', async (req, res) => {
 });
 
 
-router.get('/api/exchange/depth/:symbol', (req, res) => {
-    //todo
+router.get('/api/exchange/depth/:symbol', async (req, res) => {
     //sends get-depth to engine
     //aggregated orderbook {bids:[[price,size]...], asks:[[price,size]...], timestamp}
+    try {
+        const symbol = req.params.symbol;
+        const request_id = crypto.randomUUID();
+
+        console.log({ symbol, request_id });
+
+        await client.lPush(
+            `incoming-request`,
+            JSON.stringify({
+                BACKEND_ID,
+                request_id,
+                payload: symbol,
+                command: 'get-depth',
+            }),
+        );
+
+        const res_data: any = await get_identifier('response-queue', true);
+
+        console.log({ res_data });
+
+        const parsed_res = JSON.parse(res_data?.element);
+
+        console.log({ parsed_res });
+
+        res.json({ message: 'depth fetched successfully', data: parsed_res });
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 });
 
 
@@ -598,16 +630,57 @@ router.get("/api/exchange/positions", async (req, res) => {
 });
 
 router.get("/api/history/funding", async (req, res) => {
-    //todo
-    //NEED a funding table
-    //funding fee history.  funding-fee.ts computes and db-worker moves balances, but no FundingFee table is written — nothing is persisted. Add a FundingFee model + worker insert + endpoint.
+    //funding fee history for the user, persisted by db-worker settleFunding
+    try {
+        const user_id = req.user;
+
+        const funding_fees = await prisma.fundingFee.findMany({
+            where: {
+                user_id: user_id
+            },
+            orderBy: {
+                created_at: 'desc'
+            }
+        });
+
+        console.log({ funding_fees });
+
+        res.json({ message: "Funding fee history fetched successfully", funding_fees });
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 });
 
-router.get("api/history/liquidation", async (req, res) => {
-    //todo
-    //NEED a liquidation table
-    // liquidation events. liquidation.ts sends forced orders to the matching engine but persists nothing. 
-    // Add a Liquidation model + endpoint + WS push to the affected user
+router.get("/api/history/liquidation", async (req, res) => {
+    //liquidation events for the user, persisted by risk-engine liquidation.ts
+    try {
+        const user_id = req.user;
+
+        const liquidations = await prisma.liquidation.findMany({
+            where: {
+                user_id: user_id
+            },
+            orderBy: {
+                created_at: 'desc'
+            }
+        });
+
+        console.log({ liquidations });
+
+        res.json({ message: "Liquidation history fetched successfully", liquidations });
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 });
 
 export default router;

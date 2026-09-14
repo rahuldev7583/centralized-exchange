@@ -1,6 +1,8 @@
 
 import { createClient } from "redis";
 import { ASSETS, PRICES, SHARED_FILLS, SHARED_ORDERBOOK, LEVERAGES } from "./shared-state";
+import { prisma } from "database";
+import { scheduleUTC } from "shared-types";
 
 const matchineEngClient = createClient();
 matchineEngClient.on('error', (err: any) =>
@@ -72,6 +74,16 @@ const liquidation_check = async () => {
                 request_id: crypto.randomUUID()
             }))
 
+            await prisma.liquidation.create({
+                data: {
+                    user_id: Number(f.buy_user_id),
+                    symbol: f.symbol,
+                    side: 'long',
+                    quantity: f.filled_quantity,
+                    price: mark_price
+                }
+            })
+
         } else if (short_margin_bal <= maintaince_margin) {
             //liquidate short 
             const payload: any = { type: 'market', quantity: f.filled_quantity, symbol: f.symbol, side: 'buy', user_id: LIQUIDATION_USER_ID };
@@ -82,6 +94,16 @@ const liquidation_check = async () => {
                 BACKEND_ID: '',
                 request_id: crypto.randomUUID()
             }))
+
+            await prisma.liquidation.create({
+                data: {
+                    user_id: Number(f.sell_user_id),
+                    symbol: f.symbol,
+                    side: 'short',
+                    quantity: f.filled_quantity,
+                    price: mark_price
+                }
+            })
         }
     })
 }
@@ -94,7 +116,7 @@ export const liquidation_service = async () => {
 
     console.log("All redis client connected successfully");
 
-    setInterval(() => {
+    scheduleUTC(() => {
         console.log("liquidation");
         console.log({ SHARED_ORDERBOOK, PRICES, ASSETS, SHARED_FILLS });
         liquidation_check();

@@ -112,4 +112,17 @@ export const readableDecimal = (decimalVal: Prisma.Decimal, decimal: number) => 
     return result.toFixed(decimal);
 }
 
+//self correcting scheduler aligned to UTC wall clock boundaries
+export const scheduleUTC = (fn: () => void, intervalMs: number) => {
+    const next = () => {
+        const now = Date.now();
+        const next_boundary = Math.ceil(now / intervalMs) * intervalMs;
+        const delay = next_boundary > now ? next_boundary - now : intervalMs;
 
+        setTimeout(() => {
+            fn();
+            next();
+        }, delay);
+    };
+    next();
+}

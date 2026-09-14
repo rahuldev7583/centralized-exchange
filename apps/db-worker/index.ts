@@ -1,6 +1,6 @@
 import { createClient } from "redis";
 import { Prisma, prisma } from "database";
-import { scaledDecimal } from "shared-types";
+import { scaledDecimal, scheduleUTC } from "shared-types";
 
 const client = createClient();
 
@@ -223,6 +223,26 @@ const settleFunding = async (payload: any) => {
                     }
                 }
             })
+
+            await prisma.fundingFee.create({
+                data: {
+                    user_id: Number(fill.buy_user_id),
+                    symbol: fill.symbol,
+                    side: 'long',
+                    funding_rate: funding_rate,
+                    funding_fee: -funding_fee
+                }
+            })
+
+            await prisma.fundingFee.create({
+                data: {
+                    user_id: Number(fill.sell_user_id),
+                    symbol: fill.symbol,
+                    side: 'short',
+                    funding_rate: funding_rate,
+                    funding_fee: funding_fee
+                }
+            })
         } else if (Number(funding_rate) < 0) {
             //short of position wil pay long
 
@@ -255,6 +275,26 @@ const settleFunding = async (payload: any) => {
                     }
                 }
             })
+
+            await prisma.fundingFee.create({
+                data: {
+                    user_id: Number(fill.sell_user_id),
+                    symbol: fill.symbol,
+                    side: 'short',
+                    funding_rate: funding_rate,
+                    funding_fee: -funding_fee
+                }
+            })
+
+            await prisma.fundingFee.create({
+                data: {
+                    user_id: Number(fill.buy_user_id),
+                    symbol: fill.symbol,
+                    side: 'long',
+                    funding_rate: funding_rate,
+                    funding_fee: funding_fee
+                }
+            })
         }
 
     } catch (error) {
@@ -278,7 +318,7 @@ while (1) {
 
     await initializeStreamAndGroup();
 
-    setInterval(async () => {
+    scheduleUTC(async () => {
         await getIndexPrice()
     }, 1 * 60 * 1000)
 
@@ -812,6 +852,15 @@ while (1) {
                         locked_balance: {
                             decrement: released_margin
                         }
+                    }
+                });
+
+                await prisma.balanceHistory.create({
+                    data: {
+                        user_id: payload.user_id,
+                        symbol: quote_ast?.symbol,
+                        amount: realized_pnl + released_margin,
+                        type: 'trade'
                     }
                 });
 

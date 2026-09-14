@@ -86,6 +86,15 @@ router.post('/api/wallet/onramp', async (req, res) => {
                     }
                 })
 
+                await prisma.balanceHistory.create({
+                    data: {
+                        user_id: user_id,
+                        symbol: all_ast[i].symbol,
+                        amount: balance,
+                        type: 'deposit'
+                    }
+                })
+
             } else {
                 //await prisma.asset_balance.create({
                 //    data: {
@@ -191,6 +200,15 @@ router.post('/api/wallet/offramp', async (req, res) => {
                 }
             }
         });
+
+        await prisma.balanceHistory.create({
+            data: {
+                user_id: user_id,
+                symbol: primary_ast.symbol,
+                amount: -amount,
+                type: 'withdraw'
+            }
+        })
 
         console.log({ wallet });
         res.json({ message: "Fund withdrawn successfully", currency, amount })

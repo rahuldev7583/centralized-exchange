@@ -2,6 +2,7 @@
 import { Decimal } from "database/generated/prisma/internal/prismaNamespace";
 import { ASSETS, PRICES, SHARED_ORDERBOOK, BALANCES, LEVERAGES, SHARED_FILLS } from "./shared-state";
 import { createClient } from "redis";
+import { scheduleUTC } from "shared-types";
 
 const client = createClient();
 client.on('error', (err: any) =>
@@ -121,12 +122,14 @@ const funding_fee_collector = async () => {
 }
 
 export const funding_service = async () => {
-    setInterval(() => {
+    //funding settles on fixed UTC boundaries (every 8 hours) instead of a tight 1s interval
+    const FUNDING_INTERVAL_MS = 8 * 60 * 60 * 1000;
+
+    scheduleUTC(() => {
         console.log("funding fee collector");
         console.log({ SHARED_ORDERBOOK, SHARED_FILLS, PRICES, BALANCES, ASSETS });
 
         funding_fee_collector()
 
-    }, 1000);
+    }, FUNDING_INTERVAL_MS);
 }
-

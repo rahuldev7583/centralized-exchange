@@ -1,5 +1,5 @@
 import express from 'express';
-import { adminAuthMiddleware } from '../middleware/auth';
+import { adminAuthMiddleware, userAuthMiddleware } from '../middleware/auth';
 import { Asset, Market } from '../types/user';
 import { ZodError } from 'zod';
 //import { prisma } from '../../lib/prisma';
@@ -207,27 +207,216 @@ router.get('/api/exchange/markets', async (req, res) => {
 });
 
 router.get("/api/tickers/:symbol", async (req, res) => {
-    //todo
-    // last price, 24h change %, 24h volume, best bid/ask. Needs last_traded_price (exists on Asset) + a small agg over recent fills.
+    //last price, 24h change %, 24h volume. last_traded_price (exists on Asset) + agg over recent fills
+    try {
+        const symbol = req.params.symbol;
+        console.log({ symbol });
+
+        const asset = await prisma.asset.findUnique({
+            where: {
+                symbol: symbol
+            }
+        });
+
+        if (!asset) {
+            return res.status(404).json({ message: 'Asset not found' });
+        }
+
+        const now = new Date();
+        const twenty_four_hours_ago = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        const fills = await prisma.fill.findMany({
+            where: {
+                symbol: symbol,
+                created_at: {
+                    gte: twenty_four_hours_ago
+                }
+            },
+            orderBy: {
+                created_at: 'asc'
+            }
+        });
+
+        const last_price = Number(asset.last_traded_price);
+        const volume_24h = fills.reduce((sum, f) => sum + Number(f.price) * f.quantity, 0);
+        const open_price = fills.length ? Number(fills[0].price) : last_price;
+        const change_24h = open_price ? ((last_price - open_price) / open_price) * 100 : 0;
+
+        console.log({ last_price, change_24h, volume_24h });
+
+        res.json({
+            message: 'Ticker fetched successfully',
+            ticker: {
+                symbol: symbol,
+                last_price: last_price,
+                change_24h: change_24h,
+                volume_24h: volume_24h,
+            }
+        });
+    } catch (error: any) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 })
 
 router.get("/api/get/tickers", async (req, res) => {
-    //todo
-    // last price, 24h change %, 24h volume, best bid/ask. Needs last_traded_price (exists on Asset) + a small agg over recent fills.
+    //last price, 24h change %, 24h volume for all assets. last_traded_price (exists on Asset) + agg over recent fills
+    try {
+        const assets = await prisma.asset.findMany();
+
+        if (!assets) {
+            return res.status(404).json({ message: 'Assets not found' });
+        }
+
+        const now = new Date();
+        const twenty_four_hours_ago = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+        const tickers = await Promise.all(assets.map(async (asset) => {
+            const fills = await prisma.fill.findMany({
+                where: {
+                    symbol: asset.symbol,
+                    created_at: {
+                        gte: twenty_four_hours_ago
+                    }
+                },
+                orderBy: {
+                    created_at: 'asc'
+                }
+            });
+
+            const last_price = Number(asset.last_traded_price);
+            const volume_24h = fills.reduce((sum, f) => sum + Number(f.price) * f.quantity, 0);
+            const open_price = fills.length ? Number(fills[0].price) : last_price;
+            const change_24h = open_price ? ((last_price - open_price) / open_price) * 100 : 0;
+
+            return {
+                symbol: asset.symbol,
+                last_price: last_price,
+                change_24h: change_24h,
+                volume_24h: volume_24h,
+            };
+        }));
+
+        console.log({ tickers });
+
+        res.json({ message: 'Tickers fetched successfully', tickers: tickers });
+    } catch (error: any) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 })
 
-//router.get("/api/market/candles/:symbol?interval=1m|5m|1h|1d&from&to&limit", async (req, res) => {
-//    //todo
-//    // OHLCV for TradingView. Backed by TimescaleDB
-//})
+router.get("/api/market/candles/:symbol", async (req, res) => {
+    //OHLCV for TradingView, computed by bucketing fills by interval
+    try {
+        const symbol = req.params.symbol;
+        const interval = (req.query.interval as string) || '1m';
+        const limit = Number(req.query.limit) || 100;
+        const from = req.query.from ? Number(req.query.from) : undefined;
+        const to = req.query.to ? Number(req.query.to) : undefined;
+
+        const interval_ms: any = {
+            '1m': 60 * 1000,
+            '5m': 5 * 60 * 1000,
+            '1h': 60 * 60 * 1000,
+            '1d': 24 * 60 * 60 * 1000,
+        }[interval];
+
+        if (!interval_ms) {
+            return res.status(404).json({ message: 'Invalid interval' });
+        }
+
+        const to_date = to ? new Date(to) : new Date();
+        const from_date = from ? new Date(from) : new Date(to_date.getTime() - limit * interval_ms);
+
+        const fills = await prisma.fill.findMany({
+            where: {
+                symbol: symbol,
+                created_at: {
+                    gte: from_date,
+                    lte: to_date
+                }
+            },
+            orderBy: {
+                created_at: 'asc'
+            }
+        });
+
+        const candles_map = new Map<number, any>();
+
+        fills.forEach((f) => {
+            const time = Math.floor(new Date(f.created_at).getTime() / interval_ms) * interval_ms;
+            const price = Number(f.price);
+            const qty = f.quantity;
+
+            const candle = candles_map.get(time);
+
+            if (!candle) {
+                candles_map.set(time, {
+                    time: time,
+                    open: price,
+                    high: price,
+                    low: price,
+                    close: price,
+                    volume: qty,
+                });
+            } else {
+                candle.high = Math.max(candle.high, price);
+                candle.low = Math.min(candle.low, price);
+                candle.close = price;
+                candle.volume += qty;
+            }
+        });
+
+        const candles = Array.from(candles_map.values());
+
+        console.log({ candles });
+
+        res.json({ message: 'Candles fetched successfully', candles });
+    } catch (error: any) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
+})
 
 
-router.get("/api/history/balances", async (req, res) => {
-    //OPT
-    //todo
-    //deposits/withdrawals/trades/transfers. 
-    // No Transaction/BalanceHistory table exists. 
-    // Add one, written on onramp, offramp, and settlement.
+router.get("/api/history/balances", userAuthMiddleware, async (req, res) => {
+    //deposits/withdrawals/trades/transfers, written on onramp/offramp and settlement
+    try {
+        const user_id = req.user;
+
+        const balance_history = await prisma.balanceHistory.findMany({
+            where: {
+                user_id: user_id
+            },
+            orderBy: {
+                created_at: 'desc'
+            }
+        });
+
+        console.log({ balance_history });
+
+        res.json({ message: 'Balance history fetched successfully', balance_history });
+    } catch (error: any) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 })
 
 export default router;

@@ -1442,7 +1442,40 @@ const get_balance = (payload: any, backend_id: string, request_id: string) => {
 };
 
 const get_depth = (payload: any, backend_id: string, request_id: string) => {
-    //todo;
+    //aggregated orderbook {bids:[[price,size]...], asks:[[price,size]...], timestamp}
+    const market = ORDERBOOK.get(payload);
+
+    let asks: any[] = [];
+    let bids: any[] = [];
+
+    if (market) {
+        const agg_asks: any = {};
+        market.asks.forEach((v: any) => {
+            agg_asks[v.price] = (agg_asks[v.price] || 0) + v.quantity;
+        });
+        Object.entries(agg_asks).forEach(([price, size]) => {
+            asks.push([Number(price), size]);
+        });
+
+        const agg_bids: any = {};
+        market.bids.forEach((v: any) => {
+            agg_bids[v.price] = (agg_bids[v.price] || 0) + v.quantity;
+        });
+        Object.entries(agg_bids).forEach(([price, size]) => {
+            bids.push([Number(price), size]);
+        });
+    }
+
+    const res_data = {
+        request_id,
+        symbol: payload,
+        bids: bids,
+        asks: asks,
+        timestamp: Date.now()
+    };
+
+    publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
+    return;
 };
 
 const create_asset = (payload: any, backend_id: string, request_id: string) => {
