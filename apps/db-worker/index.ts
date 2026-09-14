@@ -399,7 +399,7 @@ while (1) {
 
         const market = await prisma.market.findFirst({
             where: {
-                symbol: parsed_settlement_req.fill.symbol
+                symbol: parsed_settlement_req.fill?.symbol || parsed_settlement_req.payload?.symbol
             }
         })
 
@@ -530,11 +530,11 @@ while (1) {
                     }
                 });
 
-                const buy_price = parsed_settlement_req.fill.type == "limit" ? scaledDecimal(parsed_settlement_req.fill.filled_quantity * parsed_settlement_req.fill.price, Number(quote_ast.decimals)) : buyer_quote?.locked_balance;
+                const buy_price = scaledDecimal(parsed_settlement_req.fill.filled_quantity * parsed_settlement_req.fill.price, Number(quote_ast.decimals));
 
                 console.log({ buy_price });
 
-                const buy_increment = parsed_settlement_req.fill.type == "market" && parsed_settlement_req.fill.order_type == "buy" ? buyer_quote?.locked_balance.minus(scaledDecimal(parsed_settlement_req.fill.filled_quantity * parsed_settlement_req.fill.price, Number(quote_ast.decimals))) : 0;
+                const buy_increment = 0;
 
                 const buy_user_quote = await prisma.asset_balance.update({
                     where: {
@@ -584,7 +584,7 @@ while (1) {
                     }
                 });
 
-                const increment_sell_base = parsed_settlement_req.fill.type == 'market' && parsed_settlement_req.fill.order_type == "sell" ? seller_base?.locked_balance.minus(parsed_settlement_req.fill.filled_quantity) : 0;
+                const increment_sell_base = 0;
 
                 const sell_user_base = await prisma.asset_balance.update({
                     where: {
@@ -642,7 +642,7 @@ while (1) {
                     data: {
                         type: payload.type,
                         quantity: payload.quantity,
-                        price: payload.price,
+                        price: payload.price ?? parsed_settlement_req.fill.price,
                         side: payload.side,
                         user_id: payload.user_id,
                         market_id: mkt?.id,

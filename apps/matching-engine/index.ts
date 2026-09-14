@@ -132,6 +132,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
             let lowest_price = 0;
             let lowest_order: string = '';
+            let notional_sum = 0;
 
             if (market.asks.size > 0) {
                 for (const [key, value] of market.asks.entries()) {
@@ -191,10 +192,13 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                             const current_ast: any = market.asks.get(v);
                             console.log({ current_ast });
 
+                            const delta_qty = payload.quantity - filled_quantity;
+                            notional_sum += lowest_price * delta_qty;
+
                             const fill: Fill = {
                                 type: payload.type,
                                 quantity: payload.quantity,
-                                filled_quantity: payload.quantity - filled_quantity,
+                                filled_quantity: delta_qty,
                                 price: lowest_price,
                                 symbol: payload.symbol,
 
@@ -211,7 +215,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                             };
                             console.log({ fill });
 
-                            filled_quantity += payload.quantity - filled_quantity;
+                            filled_quantity += delta_qty;
 
                             FILLS.push(fill);
 
@@ -231,7 +235,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             market.asks.set(v, {
                                 ...k,
-                                quantity: k.quantity - (payload.quantity - filled_quantity),
+                                quantity: k.quantity - delta_qty,
                             });
 
                         } else if (k.quantity <= payload.quantity - filled_quantity) {
@@ -276,6 +280,8 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 `settlement-queue`,
                                 JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
+
+                            notional_sum += lowest_price * current_ast.quantity;
 
                             const risk_eng_payload = {
                                 fill: fill,
@@ -329,10 +335,12 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
             console.log('outside loop');
 
+            const avg_price = filled_quantity > 0 ? notional_sum / filled_quantity : lowest_price || 0;
+
             const res_data: engineResponse = {
                 request_id,
                 order_id,
-                price: payload.price || 0,
+                price: avg_price,
                 filled_quantity: filled_quantity,
                 status: 'order accepted',
                 message: 'Order got filled'
@@ -357,6 +365,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
             let highest_price = 0;
             let highest_order: string = '';
+            let notional_sum = 0;
 
             if (market.bids.size > 0) {
                 for (const [key, value] of market.bids.entries()) {
@@ -416,13 +425,13 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                             const current_ast: any = market.bids.get(v);
                             console.log({ current_ast });
 
-                            filled_quantity += payload.quantity - filled_quantity;
-
+                            const delta_qty = payload.quantity - filled_quantity;
+                            filled_quantity += delta_qty;
 
                             const fill: Fill = {
                                 type: payload.type,
                                 quantity: payload.quantity,
-                                filled_quantity: payload.quantity - filled_quantity,
+                                filled_quantity: delta_qty,
                                 //price: payload.price,
                                 price: highest_price,
                                 symbol: payload.symbol,
@@ -445,6 +454,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 `settlement-queue`,
                                 JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
+                            notional_sum += highest_price * delta_qty;
 
                             const risk_eng_payload = {
                                 fill: fill,
@@ -458,7 +468,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             market.bids.set(v, {
                                 ...k,
-                                quantity: k.quantity - (payload.quantity - filled_quantity),
+                                quantity: k.quantity - delta_qty,
                             })
                         } else if (k.quantity <= payload.quantity - filled_quantity) {
                             //remove from orderbook, increase the fill
@@ -501,6 +511,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 `settlement-queue`,
                                 JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
+                            notional_sum += highest_price * current_ast.quantity;
                             const risk_eng_payload = {
                                 fill: fill,
                                 command: "fill-order"
@@ -552,10 +563,11 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
             console.log('outside loop');
 
+            const avg_price = filled_quantity > 0 ? notional_sum / filled_quantity : highest_price || 0;
             const res_data: engineResponse = {
                 request_id,
                 order_id,
-                price: payload.price || 0,
+                price: avg_price,
                 filled_quantity: filled_quantity,
                 status: 'order accepted',
                 message: 'Order got filled'
@@ -1564,14 +1576,14 @@ while (1) {
         engine_status = 'ready'
     }
 
-    const liqudation_req = await client.brPop('liquidation-to-matching-eng', 2);
+    const liqudation_req = await client.brPop('liquidation-to-matching-eng', 0.1);
 
     console.log({ liqudation_req });
 
     const parsed_liquidation_req = liqudation_req && JSON.parse(liqudation_req.element);
     console.log({ parsed_liquidation_req });
 
-    const incoming_req = await client.brPop('incoming-request', 2);
+    const incoming_req = await client.brPop('incoming-request', 0.1);
 
     //  const res = await client.brPop('create-order', 2);
 
@@ -1623,7 +1635,7 @@ while (1) {
     //filled
     //cancelled
 
-    const incoming_risk_req = await riskEngclient.brPop("risk-to-matching-eng", 2);
+    const incoming_risk_req = await riskEngclient.brPop("risk-to-matching-eng", 0.1);
 
     const parsed_risk_req = incoming_risk_req && JSON.parse(incoming_risk_req.element)
 

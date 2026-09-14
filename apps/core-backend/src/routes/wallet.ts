@@ -14,10 +14,10 @@ router.post('/api/wallet/onramp', async (req, res) => {
     const { currency, amount } = req.body;
     //increase usd amount
 
-    if (amount > 0) {
+    if (!amount || amount <= 0) {
         return res.status(404).json({ message: "Invalid amount" })
     }
-    if (currency.length > 0) {
+    if (!currency || currency.length == 0) {
         return res.status(404).json({ message: "Invalid currency" })
     }
 
@@ -169,6 +169,10 @@ router.post('/api/wallet/offramp', async (req, res) => {
         const { currency, amount } = req.body;
         //decrease usd amount
 
+        if (!amount || amount <= 0) {
+            return res.status(404).json({ message: "Invalid amount" })
+        }
+
         console.log('offramp called');
         const user_id = req.user;
         console.log({ user_id });
@@ -188,6 +192,8 @@ router.post('/api/wallet/offramp', async (req, res) => {
 
         //call offramp service
 
+        const scaled_amount = await scaledDecimal(amount, Number(primary_ast.decimals));
+
         const wallet = await prisma.asset_balance.update({
             where: {
                 user_id_assetId: {
@@ -196,7 +202,7 @@ router.post('/api/wallet/offramp', async (req, res) => {
                 }
             }, data: {
                 balance: {
-                    decrement: amount
+                    decrement: scaled_amount
                 }
             }
         });
@@ -205,7 +211,7 @@ router.post('/api/wallet/offramp', async (req, res) => {
             data: {
                 user_id: user_id,
                 symbol: primary_ast.symbol,
-                amount: -amount,
+                amount: -scaled_amount,
                 type: 'withdraw'
             }
         })
@@ -246,11 +252,16 @@ router.get('/api/wallet/balance', async (req, res) => {
             });
 
             if (!ast) {
-                return
+                ast_balances.push({
+                    asset: all_ast[i].symbol,
+                    available: "0",
+                    locked: "0"
+                });
+                continue;
             }
 
             ast_balances.push({
-                asset: all_ast[i].name,
+                asset: all_ast[i].symbol,
                 available: readableDecimal(ast.balance, Number(all_ast[i].decimals)),
                 locked: readableDecimal(ast.locked_balance, Number(all_ast[i].decimals))
             });

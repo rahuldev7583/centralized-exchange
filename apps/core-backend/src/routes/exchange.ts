@@ -1,5 +1,5 @@
 import express from 'express';
-import { BACKEND_ID, client, riskEngineclient, get_identifier, leverageClient } from '..';
+import { BACKEND_ID, client, riskEngineclient, leverageClient } from '..';
 import { find_asset, find_market, get_balance } from '../middleware/exchange';
 import { prisma } from 'database';
 import { scaledDecimal } from 'shared-types';
@@ -10,20 +10,70 @@ import { Prisma, } from '../../generated/prisma/client';
 
 const router = express();
 
-const spotClient = createClient();
-spotClient.on('error', (err: any) =>
-    console.log({ msg: 'Redis client error', err }),
-);
+async function waitForResponse(queue: string, request_id: string, timeoutMs: number): Promise<any | null> {
+    const res_client = createClient();
+    res_client.on('error', () => { });
+    await res_client.connect();
+    const deadline = Date.now() + timeoutMs;
+    try {
+        while (Date.now() < deadline) {
+            const remaining = deadline - Date.now();
+            if (remaining <= 0) break;
+            const block = Math.min(5, Math.max(1, Math.ceil(remaining / 1000)));
+            const el = await res_client.brPop(queue, block);
+            if (!el) continue;
+            let parsed: any;
+            try {
+                parsed = JSON.parse(el.element);
+            } catch {
+                continue;
+            }
+            if (parsed?.request_id === request_id) {
+                return parsed;
+            }
+            // not belong to this — put it back at the head for another waiter
+            await res_client.lPush(queue, el.element);
+        }
+        return null;
+    } finally {
+        res_client.quit().catch(() => { });
+    }
+}
 
-spotClient.connect();
-console.log('spotClient Connected');
+async function getBestPrice(symbol: string, side: 'buy' | 'sell'): Promise<number | null> {
+    try {
+        const request_id = crypto.randomUUID();
+        await client.lPush(
+            `incoming-request`,
+            JSON.stringify({
+                BACKEND_ID,
+                request_id,
+                payload: symbol,
+                command: 'get-depth',
+            }),
+        );
 
-const perpClient = createClient();
-perpClient.on('error', (err: any) =>
-    console.log({ msg: 'Redis client error', err }),
-);
-perpClient.connect();
-console.log('perpClient Connected');
+        const parsed = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 8000);
+        if (!parsed) return null;
+
+        const asks: [number, number][] = parsed.asks || [];
+        const bids: [number, number][] = parsed.bids || [];
+
+        if (side === 'buy') {
+            if (!asks.length) return null;
+            let best = Number.POSITIVE_INFINITY;
+            for (const [p] of asks) best = Math.min(best, Number(p));
+            return Number.isFinite(best) ? best : null;
+        } else {
+            if (!bids.length) return null;
+            let best = 0;
+            for (const [p] of bids) best = Math.max(best, Number(p));
+            return best > 0 ? best : null;
+        }
+    } catch (e) {
+        return null;
+    }
+}
 
 router.post('/api/exchange/spot/order', async (req, res) => {
     try {
@@ -69,7 +119,16 @@ router.post('/api/exchange/spot/order', async (req, res) => {
             }
         });
 
-        const required_bal = type == "limit" ? scaledDecimal(price * quantity, Number(quote_ast.decimals)) : user_quote_ast?.balance;
+        let required_bal;
+        if (type == 'limit') {
+            required_bal = scaledDecimal(price * quantity, Number(quote_ast.decimals));
+        } else {
+            const best = await getBestPrice(symbol, side);
+            if (!best) {
+                return res.status(404).json({ message: 'No liquidity available for market order' });
+            }
+            required_bal = scaledDecimal(best * quantity, Number(quote_ast.decimals));
+        }
         //for buy, check the currency balance, for sell check the asset balance
         //for buy lock the currency, for sell lock the asset
 
@@ -82,7 +141,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
             }
         });
 
-        const required_bal_sell = type == 'limit' ? scaledDecimal(quantity, Number(base_ast.decimals)) : user_base_ast?.balance;
+        const required_bal_sell = scaledDecimal(quantity, Number(base_ast.decimals));
 
 
         if (side == 'buy' && Number(required_bal) > quote_bal.balance) {
@@ -164,14 +223,11 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 0);
-        console.log({ res_data });
+        const parsed_res = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 15000);
 
-        if (!res_data) {
+        if (!parsed_res) {
             return res.status(404).json({ message: "Order rejected! matching engine not processing orders", })
         }
-
-        const parsed_res = JSON.parse(res_data?.element);
 
         console.log({ parsed_res });
 
@@ -289,19 +345,14 @@ router.post('/api/exchange/future/order', async (req, res) => {
             url: `response-queue-perp-${BACKEND_ID}`
         });
 
-        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 4);
-        console.log({ res_data });
-        const parsed_res = res_data && JSON.parse(res_data?.element);
+        const [parsed_res, parsed_risk_res] = await Promise.all([
+            waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 10000),
+            waitForResponse(`response-queue-perp-${BACKEND_ID}`, request_id, 10000),
+        ]);
 
-        const risk_res_data = await perpClient.brPop(`response-queue-perp-${BACKEND_ID}`, 4);
+        console.log({ parsed_res, parsed_risk_res });
 
-        console.log({ risk_res_data });
-
-        const parsed_risk_res = risk_res_data && JSON.parse(risk_res_data?.element);
-
-        console.log({ parsed_risk_res });
-
-        if (res_data) {
+        if (parsed_res) {
             res.json({ message: 'order placed', data: parsed_res });
         } else {
             res.json({ message: 'order placed', data: parsed_risk_res });
@@ -340,11 +391,11 @@ router.get('/api/exchange/spot/order/:order_id', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const res_data: any = await get_identifier('response-queue');
+        const parsed_res = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 10000);
 
-        console.log({ res_data });
-
-        const parsed_res = JSON.parse(res_data?.element);
+        if (!parsed_res) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
 
         console.log({ parsed_res });
 
@@ -380,11 +431,11 @@ router.delete('/api/exchange/spot/order/:order_id', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const res_data: any = await get_identifier('response-queue');
+        const parsed_res = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 10000);
 
-        console.log({ res_data });
-
-        const parsed_res = JSON.parse(res_data?.element);
+        if (!parsed_res) {
+            return res.status(404).json({ message: 'Order not found' });
+        }
 
         console.log({ parsed_res });
 
@@ -419,11 +470,11 @@ router.get('/api/exchange/depth/:symbol', async (req, res) => {
             }),
         );
 
-        const res_data: any = await get_identifier('response-queue', true);
+        const parsed_res = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 10000);
 
-        console.log({ res_data });
-
-        const parsed_res = JSON.parse(res_data?.element);
+        if (!parsed_res) {
+            return res.status(404).json({ message: 'Depth not available' });
+        }
 
         console.log({ parsed_res });
 
@@ -464,11 +515,11 @@ router.post('/api/exchange/leverage', async (req, res) => {
                 command: 'leverage-update',
             }),
         );
-        const res_data: any = await get_identifier('leverage-res-queue', false);
+        const parsed_res = await waitForResponse('leverage-res-queue', request_id, 10000);
 
-        console.log({ res_data });
-
-        const parsed_res = JSON.parse(res_data?.element);
+        if (!parsed_res) {
+            return res.status(404).json({ message: 'Leverage update not confirmed' });
+        }
 
         console.log({ parsed_res });
 

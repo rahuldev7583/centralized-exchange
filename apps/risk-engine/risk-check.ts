@@ -66,12 +66,12 @@ export const risk_check_service = async () => {
         //initialize perp orderbook
         //load all user asset balance and leverage
 
-        const risk_engine_req = await client.brPop('risk-engine-req-queue', 2);
+        const risk_engine_req = await client.brPop('risk-engine-req-queue', 0.1);
 
         console.log({ risk_engine_req });
 
         //console.log({ SHARED_ORDERBOOK, FILLS, PRICES });
-        const leverage_req = await leverageClient.brPop('leverage-req-queue', 2);
+        const leverage_req = await leverageClient.brPop('leverage-req-queue', 0.1);
         console.log({ leverage_req });
 
         //if (!risk_engine_req && !leverage_req) {
