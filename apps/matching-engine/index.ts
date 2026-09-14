@@ -84,7 +84,10 @@ liquidationClient.on('error', (err: any) =>
 //const BALANCES: any = [];
 //const ORDERS: any = [];
 
-const create_order = (payload: any, backend_id: string, request_id: string, request_type?: string) => {
+const create_order = (payload: any, backend_id: string, request_id: string, request_type?: string, command?: string) => {
+
+    //if request_type is perp => fill will handle differently => will send postion of both 
+
     console.log({ payload });
     console.log({ ORDERBOOK });
     const order_id: string = crypto.randomUUID();
@@ -196,7 +199,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: payload.user_id,
-                                sell_user_Id: current_ast.user_id,
+                                sell_user_id: current_ast.user_id,
 
                                 buy_order_id: order_id,
                                 sell_order_id: current_ast.order_id,
@@ -210,15 +213,11 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             filled_quantity += payload.quantity - filled_quantity;
 
-                            //dbWorkerclient.lPush(
-                            //    `settlement-queue`,
-                            //    JSON.stringify(res_data, payload),
-                            //);
                             FILLS.push(fill);
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type: request_type }),
+                                JSON.stringify({ fill, payload, request_type: request_type, order_id, command: command || 'create-fill' }),
                             );
 
                             const risk_eng_payload = {
@@ -258,7 +257,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: payload.user_id,
-                                sell_user_Id: current_ast.user_id,
+                                sell_user_id: current_ast.user_id,
 
                                 buy_order_id: order_id,
                                 sell_order_id: current_ast.order_id,
@@ -275,7 +274,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type }),
+                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
 
                             const risk_eng_payload = {
@@ -429,7 +428,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: current_ast.user_id,
-                                sell_user_Id: payload.user_id,
+                                sell_user_id: payload.user_id,
 
                                 buy_order_id: current_ast.order_id,
                                 sell_order_id: order_id,
@@ -444,7 +443,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type }),
+                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
 
                             const risk_eng_payload = {
@@ -485,7 +484,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: current_ast.user_id,
-                                sell_user_Id: payload.user_id,
+                                sell_user_id: payload.user_id,
 
                                 buy_order_id: current_ast.order_id,
                                 sell_order_id: order_id,
@@ -500,7 +499,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type }),
+                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
                             const risk_eng_payload = {
                                 fill: fill,
@@ -676,10 +675,10 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                     `response-queue-${backend_id}`,
                     JSON.stringify(res_data),
                 );
-                //dbWorkerclient.lPush(
-                //    `settlement-queue`,
-                //    JSON.stringify({ ...res_data, ...payload }),
-                //);
+                dbWorkerclient.lPush(
+                    `settlement-queue`,
+                    JSON.stringify({ ...res_data, payload, command: "create-order" }),
+                );
                 return;
             } else {
                 console.log('else called');
@@ -744,7 +743,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: payload.user_id,
-                                sell_user_Id: current_ast.user_id,
+                                sell_user_id: current_ast.user_id,
 
                                 buy_order_id: order_id,
                                 sell_order_id: current_ast.order_id,
@@ -774,7 +773,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type }),
+                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
                             riskEngPubclient.lPush(
                                 `matching-to-risk-pub-queue`,
@@ -808,7 +807,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: payload.user_id,
-                                sell_user_Id: current_ast.user_id,
+                                sell_user_id: current_ast.user_id,
 
                                 buy_order_id: order_id,
                                 sell_order_id: current_ast.order_id,
@@ -823,7 +822,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type }),
+                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
                             const risk_eng_payload = {
                                 fill: fill,
@@ -907,7 +906,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: payload.user_id,
-                                sell_user_Id: current_ast.user_id,
+                                sell_user_id: current_ast.user_id,
 
                                 buy_order_id: order_id,
                                 sell_order_id: current_ast.order_id,
@@ -922,7 +921,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type }),
+                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
                             const risk_eng_payload = {
                                 fill: fill,
@@ -1063,10 +1062,10 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                     `response-queue-${backend_id}`,
                     JSON.stringify(res_data),
                 );
-                //dbWorkerclient.lPush(
-                //    `settlement-queue`,
-                //    JSON.stringify({ ...res_data, ...payload }),
-                //);
+                dbWorkerclient.lPush(
+                    `settlement-queue`,
+                    JSON.stringify({ ...res_data, payload, command: "create-order" }),
+                );
                 return;
             } else {
                 console.log('else called');
@@ -1142,7 +1141,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: current_ast.user_id,
-                                sell_user_Id: payload.user_id,
+                                sell_user_id: payload.user_id,
 
                                 buy_order_id: current_ast.order_id,
                                 sell_order_id: order_id,
@@ -1157,7 +1156,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type }),
+                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
 
                             const risk_eng_payload = {
@@ -1245,7 +1244,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
                                 symbol: payload.symbol,
 
                                 buy_user_id: current_ast.user_id,
-                                sell_user_Id: payload.user_id,
+                                sell_user_id: payload.user_id,
 
                                 buy_order_id: current_ast.order_id,
                                 sell_order_id: order_id,
@@ -1260,7 +1259,7 @@ const create_order = (payload: any, backend_id: string, request_id: string, requ
 
                             dbWorkerclient.lPush(
                                 `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type }),
+                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
                             );
 
                             const risk_eng_payload = {
@@ -1390,7 +1389,7 @@ const cancel_order = (payload: any, backend_id: string, request_id: string) => {
         JSON.stringify(risk_eng_payload),
     );
 
-    const settle = { request_id, status: 'order cancelled', filled_quantity: 0, message: '', ...order, fill: {}, payload: { symbol: order.symbol } };
+    const settle = { request_id, filled_quantity: 0, message: '', ...order, fill: {}, payload: { symbol: order.symbol }, command: "cancel-order" };
 
     dbWorkerclient.lPush(
         `settlement-queue`,
@@ -1662,6 +1661,19 @@ while (1) {
                 parsed_risk_req.BACKEND_ID,
                 parsed_risk_req.request_id,
                 "perp"
+            );
+        } else if (parsed_risk_req.command === 'close-position') {
+            console.log('PERP close order called');
+
+            const price = Number(parsed_risk_req.payload.price);
+            const quantity = Number(parsed_risk_req.payload.quantity);
+
+            create_order(
+                { ...parsed_risk_req.payload, price, quantity },
+                parsed_risk_req.BACKEND_ID,
+                parsed_risk_req.request_id,
+                "perp",
+                "close-position"
             );
         }
     }

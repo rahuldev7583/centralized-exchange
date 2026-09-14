@@ -1,5 +1,5 @@
 import { createClient } from "redis";
-import { prisma } from "database";
+import { Prisma, prisma } from "database";
 import { scaledDecimal } from "shared-types";
 
 const client = createClient();
@@ -62,7 +62,7 @@ async function initializeStreamAndGroup() {
     try {
         await client.xGroupCreate(STREAM_NAME, GROUP_NAME, '0', { MKSTREAM: true });
         console.log(`[Setup] Consumer group '${GROUP_NAME}' created.`);
-    } catch (err) {
+    } catch (err: any) {
 
         if (err.message.includes('BUSYGROUP')) {
             //console.log(`[Setup] Consumer group '${GROUP_NAME}' already exists. Proceeding...`);
@@ -88,7 +88,7 @@ const getIndexPrice = async () => {
 
         if (!response || response.length === 0) return;
 
-        const [{ messages }] = response;
+        const [{ messages }]: any = response;
 
         for (const message of messages) {
             const { id, message: data } = message;
@@ -170,90 +170,96 @@ const createORUpdateLeverage = async (data: any) => {
 }
 
 const settleFunding = async (payload: any) => {
-    const asts = payload.fill.symbol.split(/_/);
-    console.log({ asts });
+    try {
+        const asts = payload.fill.symbol.split(/_/);
+        console.log({ asts });
 
-    const base_ast = await prisma.asset.findUnique({
-        where: {
-            symbol: asts[0]
+        const base_ast = await prisma.asset.findUnique({
+            where: {
+                symbol: asts[0]
+            }
+        })
+        const quote_ast = await prisma.asset.findUnique({
+            where: {
+                symbol: asts[1]
+            }
+        })
+        if (!base_ast || !quote_ast) {
+            return;
         }
-    })
-    const quote_ast = await prisma.asset.findUnique({
-        where: {
-            symbol: asts[1]
+
+        const funding_fee = payload.funding_fee;
+        const funding_rate = payload.funding_rate;
+        const fill = payload.fill;
+
+        if (Number(funding_rate) > 0) {
+            //long of this postion will pay short
+            //decrease the usdc from buy user and increase of sell user
+
+            await prisma.asset_balance.update({
+                where: {
+                    user_id_assetId: {
+                        user_id: Number(fill.buy_user_id),
+                        assetId: quote_ast?.id
+                    }
+                },
+                data: {
+                    balance: {
+                        decrement: funding_fee
+                    }
+                }
+            })
+
+            await prisma.asset_balance.update({
+                where: {
+                    user_id_assetId: {
+                        user_id: Number(fill.sell_user_id),
+                        assetId: quote_ast?.id
+                    }
+                },
+                data: {
+                    balance: {
+                        increment: funding_fee
+                    }
+                }
+            })
+        } else if (Number(funding_rate) < 0) {
+            //short of position wil pay long
+
+            //decrease the usdc from sell user and increase of sell user
+
+            await prisma.asset_balance.update({
+                where: {
+                    user_id_assetId: {
+                        user_id: Number(fill.sell_user_id),
+                        assetId: quote_ast?.id
+                    }
+                },
+                data: {
+                    balance: {
+                        decrement: funding_fee
+                    }
+                }
+            })
+
+            await prisma.asset_balance.update({
+                where: {
+                    user_id_assetId: {
+                        user_id: Number(fill.buy_user_id),
+                        assetId: quote_ast?.id
+                    }
+                },
+                data: {
+                    balance: {
+                        increment: funding_fee
+                    }
+                }
+            })
         }
-    })
-    if (!base_ast || !quote_ast) {
-        return;
-    }
 
-    const funding_fee = payload.funding_fee;
-    const funding_rate = payload.funding_rate;
-    const fill = payload.fill;
+    } catch (error) {
+        console.log({ error });
 
-    if (Number(funding_rate) > 0) {
-        //long of this postion will pay short
-        //decrease the usdc from buy user and increase of sell user
-
-        await prisma.asset_balance.update({
-            where: {
-                user_id_assetId: {
-                    user_id: Number(fill.buy_user_id),
-                    assetId: quote_ast?.id
-                }
-            },
-            data: {
-                balance: {
-                    decrement: funding_fee
-                }
-            }
-        })
-
-        await prisma.asset_balance.update({
-            where: {
-                user_id_assetId: {
-                    user_id: Number(fill.sell_user_Id),
-                    assetId: quote_ast?.id
-                }
-            },
-            data: {
-                balance: {
-                    increment: funding_fee
-                }
-            }
-        })
-    } else if (Number(funding_rate) < 0) {
-        //short of position wil pay long
-
-        //decrease the usdc from sell user and increase of sell user
-
-        await prisma.asset_balance.update({
-            where: {
-                user_id_assetId: {
-                    user_id: Number(fill.sell_user_Id),
-                    assetId: quote_ast?.id
-                }
-            },
-            data: {
-                balance: {
-                    decrement: funding_fee
-                }
-            }
-        })
-
-        await prisma.asset_balance.update({
-            where: {
-                user_id_assetId: {
-                    user_id: Number(fill.buy_user_id),
-                    assetId: quote_ast?.id
-                }
-            },
-            data: {
-                balance: {
-                    increment: funding_fee
-                }
-            }
-        })
     }
     console.log("Funding fee collected and transfered");
 
@@ -350,7 +356,12 @@ while (1) {
                 symbol: asts[1]
             }
         });
-        console.log({ base_ast, quote_ast });
+
+        const market = await prisma.market.findFirst({
+            where: {
+                symbol: parsed_settlement_req.fill.symbol
+            }
+        })
 
 
         if (!base_ast || !quote_ast) {
@@ -360,16 +371,118 @@ while (1) {
         }
 
 
-        if (parsed_settlement_req.fill.filled_quantity > 0) {
+        if (parsed_settlement_req.command == 'create-fill') {
             //some order were filled, calculate and update asset balances
             console.log("update asset balance");
             //i have to  update for base and quote asset balance for both buy and sell side
 
-            if (parsed_settlement_req.request_type == 'perp') {
+            const fill = parsed_settlement_req.fill;
+            const payload = parsed_settlement_req.payload;
 
-                //TODO
+            if (parsed_settlement_req.request_type == 'perp') {
+                // //create long and short position row, if user positin already exit for that market then increase by weightated
+
+                //need initial margin, market id, user_id, side, quantity, entry price, leverage
+
+                const long_position = await prisma.position.findFirst({
+                    where: {
+                        user_id: fill.buy_user_id,
+                        market_id: market?.id
+                    }
+                });
+
+                console.log({ long_position });
+
+                if (!long_position) {
+                    const long = {
+                        id: crypto.randomUUID(),
+                        user_id: fill.buy_user_id,
+                        market_id: market?.id as number,
+                        quantity: fill.filled_quantity,
+                        side: "long",
+                        entryPrice: fill.price,
+                        initial_margin: payload.initial_margin,
+                        leverage: 1,
+                    };
+                    const created_long = await prisma.position.create({
+                        data: long
+                    });
+                    console.log({ created_long });
+                } else {
+                    //increase the position by weighted average
+                    const total_quantity = new Prisma.Decimal(long_position.quantity).add(new Prisma.Decimal(fill.filled_quantity));
+
+                    const weighted_entry_price = new Prisma.Decimal(long_position.entryPrice).mul(new Prisma.Decimal(long_position.quantity)).add(new Prisma.Decimal(fill.price).mul(new Prisma.Decimal(fill.filled_quantity))).div(total_quantity);
+
+                    const updated_long = await prisma.position.update({
+                        where: {
+                            id: long_position.id
+                        },
+                        data: {
+                            quantity: total_quantity,
+                            entryPrice: weighted_entry_price,
+                            initial_margin: new Prisma.Decimal(long_position.initial_margin).add(payload.initial_margin),
+                        }
+                    });
+                    console.log({ updated_long });
+                }
+
+                const short_position = await prisma.position.findFirst({
+                    where: {
+                        user_id: fill.sell_user_id,
+                        market_id: market?.id
+                    }
+                });
+
+                console.log({ short_position });
+
+                if (!short_position) {
+                    const short = {
+                        id: crypto.randomUUID(),
+                        user_id: fill.sell_user_id,
+                        market_id: market?.id as number,
+                        quantity: fill.filled_quantity,
+                        side: "short",
+                        entryPrice: fill.price,
+                        initial_margin: payload.initial_margin,
+                        leverage: 1,
+                    };
+                    const created_short = await prisma.position.create({
+                        data: short
+                    });
+                    console.log({ created_short });
+                } else {
+                    //increase the position by weighted average
+                    const total_quantity = new Prisma.Decimal(short_position.quantity).add(new Prisma.Decimal(fill.filled_quantity));
+
+                    const weighted_entry_price = new Prisma.Decimal(short_position.entryPrice).mul(new Prisma.Decimal(short_position.quantity)).add(new Prisma.Decimal(fill.price).mul(new Prisma.Decimal(fill.filled_quantity))).div(total_quantity);
+
+                    const updated_short = await prisma.position.update({
+                        where: {
+                            id: short_position.id
+                        },
+                        data: {
+                            quantity: total_quantity,
+                            entryPrice: weighted_entry_price,
+                            initial_margin: new Prisma.Decimal(short_position.initial_margin).add(payload.initial_margin),
+                        }
+                    });
+                    console.log({ updated_short });
+                }
+
 
             } else {
+
+                const mkt = await prisma.market.findFirst({
+                    where: {
+                        symbol: parsed_settlement_req.payload.symbol
+                    }
+                });
+
+                if (!mkt) {
+                    console.log("market not found");
+
+                }
                 const buyer_quote = await prisma.asset_balance.findFirst({
                     where: {
                         user_id: parsed_settlement_req.fill.buy_user_id,
@@ -436,7 +549,7 @@ while (1) {
                 const sell_user_base = await prisma.asset_balance.update({
                     where: {
                         user_id_assetId: {
-                            user_id: parsed_settlement_req.fill.sell_user_Id,
+                            user_id: parsed_settlement_req.fill.sell_user_id,
                             assetId: base_ast?.id
                         }
                     },
@@ -455,11 +568,10 @@ while (1) {
 
                 console.log({ quote_bal });
 
-
                 const sell_user_quote = await prisma.asset_balance.update({
                     where: {
                         user_id_assetId: {
-                            user_id: parsed_settlement_req.fill.sell_user_Id,
+                            user_id: parsed_settlement_req.fill.sell_user_id,
                             assetId: quote_ast?.id
                         }
                     },
@@ -480,9 +592,82 @@ while (1) {
                         last_traded_price: scaledDecimal(parsed_settlement_req.fill.price, Number(base_ast.decimals))
                     }
                 })
+
+                const fill_msg = parsed_settlement_req.payload.quantity == parsed_settlement_req.fill.filled_quantity ? "filled" : "partially filled";
+                //fix this, both buy and sell side can have differenet status of fill
+
+                const payload = parsed_settlement_req.payload;
+
+                await prisma.order.create({
+                    data: {
+                        type: payload.type,
+                        quantity: payload.quantity,
+                        price: payload.price,
+                        side: payload.side,
+                        user_id: payload.user_id,
+                        market_id: mkt?.id,
+                        entry_price: 0,
+                        filled: parsed_settlement_req.fill.filled_quantity,
+                        status: "open",
+                        initial_margin: 0,
+                        id: parsed_settlement_req.order_id
+                    }
+                });
+                console.log("order created successfully");
+
+                await prisma.fill.create({
+                    data: {
+                        type: parsed_settlement_req.fill.type,
+                        price: parsed_settlement_req.fill.price,
+                        quantity: parsed_settlement_req.fill.filled_quantity,
+                        status: fill_msg,
+
+                        ask_order_id: parsed_settlement_req.fill.sell_order_id,
+                        bid_order_id: parsed_settlement_req.fill.buy_order_id,
+
+
+
+                        sell_user_id: parsed_settlement_req.fill.sell_user_id,
+                        buy_user_id: parsed_settlement_req.fill.buy_user_id,
+
+                        symbol: parsed_settlement_req.fill.symbol,
+                        id: parsed_settlement_req.fill.fill_id
+                    }
+                })
+
+                await prisma.order.update({
+                    where: {
+                        id: parsed_settlement_req.fill.sell_order_id,
+                        user_id: parsed_settlement_req.fill.sell_user_id
+                    }, data: {
+                        status: fill_msg,
+                        filled: parsed_settlement_req.fill.filled_quantity
+                    }
+                });
+
+                await prisma.order.update({
+                    where: {
+                        id: parsed_settlement_req.fill.buy_order_id,
+                        user_id: parsed_settlement_req.fill.buy_user_id
+                    }, data: {
+                        status: fill_msg,
+                        filled: parsed_settlement_req.fill.filled_quantity
+                    }
+                });
+
+                //order type => buy or sell
+
+                //if perp order => get all the positions of buyer and seller
+
+                //if buyer position is long, increasing the position
+                //else closing a short : Realize PNL => update user quote balance either profit or loss
+                //do similarly for seller
+
+                //loop over only active postion , shared_fill is historic data
+                //margin balance is Total Collateral Wallet Balance + uPnL
             }
         }
-        else if (parsed_settlement_req.status == 'order cancelled') {
+        else if (parsed_settlement_req.command == 'cancel-order') {
             //order cancel, caculated and update asset balances
 
             //if it's buy order then decrease user's quote asset balance and increase balance
@@ -530,11 +715,173 @@ while (1) {
                         }
                     })
                 }
+                console.log('cancel_order');
+
+                await prisma.order.update({
+                    where: {
+                        id: parsed_settlement_req.order_id,
+                        user_id: parsed_settlement_req.user_id
+                    }, data: {
+                        status: 'cancelled',
+                        filled: 0
+                    }
+                });
             } catch (error) {
                 console.log({ error });
 
             }
+        } else if (parsed_settlement_req.command == 'create-order') {
+            //open orders sitting on the orderbook
+
+            //update db
+
+            const payload = parsed_settlement_req.payload;
+            console.log({ payload });
+
+            const mkt = await prisma.market.findFirst({
+                where: {
+                    symbol: payload.symbol
+                }
+            });
+
+            if (!mkt) {
+                console.log("Market not found");
+                //reject order
+            } else {
+                await prisma.order.create({
+                    data: {
+                        type: payload.type,
+                        quantity: payload.quantity,
+                        price: payload.price,
+                        side: payload.side,
+                        user_id: payload.user_id,
+                        market_id: mkt?.id,
+                        entry_price: 0,
+                        filled: 0,
+                        status: "open",
+                        initial_margin: 0,
+                        id: parsed_settlement_req.order_id
+                    }
+                });
+                console.log("order created successfully");
+            }
+        } else if (parsed_settlement_req.command == 'close-position') {
+            //closing user => realize PnL, release margin, reduce/delete position
+            //counterparty => either create new position or increase existing one by weighted average
+
+            const fill = parsed_settlement_req.fill;
+            const payload = parsed_settlement_req.payload;
+
+            console.log({ fill, payload });
+
+            const position = await prisma.position.findFirst({
+                where: {
+                    user_id: payload.user_id,
+                    market_id: market?.id
+                }
+            });
+
+            console.log({ position });
+
+            if (position) {
+                const entry_price = Number(position.entryPrice);
+                const exit_price = Number(fill.price);
+                const close_quantity = Number(fill.filled_quantity);
+                const position_quantity = Number(position.quantity);
+
+                //realized PnL => long (exit - entry), short (entry - exit)
+                const realized_pnl = position.side == 'long'
+                    ? (exit_price - entry_price) * close_quantity
+                    : (entry_price - exit_price) * close_quantity;
+
+                const released_margin = Number(position.initial_margin) * (close_quantity / position_quantity);
+
+                console.log({ realized_pnl, released_margin });
+
+                await prisma.asset_balance.update({
+                    where: {
+                        user_id_assetId: {
+                            user_id: payload.user_id,
+                            assetId: quote_ast?.id
+                        }
+                    },
+                    data: {
+                        balance: {
+                            increment: realized_pnl + released_margin
+                        },
+                        locked_balance: {
+                            decrement: released_margin
+                        }
+                    }
+                });
+
+                const remaining_quantity = position_quantity - close_quantity;
+
+                if (remaining_quantity <= 0) {
+                    await prisma.position.delete({
+                        where: {
+                            id: position.id
+                        }
+                    });
+                } else {
+                    await prisma.position.update({
+                        where: {
+                            id: position.id
+                        },
+                        data: {
+                            quantity: remaining_quantity,
+                            initial_margin: new Prisma.Decimal(Number(position.initial_margin) - released_margin)
+                        }
+                    });
+                }
+                console.log("position closed");
+            }
+
+            //counterparty => create or increase their position
+            const counter_user_id = fill.buy_user_id == payload.user_id ? fill.sell_user_id : fill.buy_user_id;
+            const counter_side = fill.buy_user_id == payload.user_id ? 'short' : 'long';
+
+            const counter_position = await prisma.position.findFirst({
+                where: {
+                    user_id: counter_user_id,
+                    market_id: market?.id
+                }
+            });
+
+            console.log({ counter_position });
+
+            if (!counter_position) {
+                await prisma.position.create({
+                    data: {
+                        id: crypto.randomUUID(),
+                        user_id: counter_user_id,
+                        market_id: market?.id as number,
+                        quantity: fill.filled_quantity,
+                        side: counter_side,
+                        entryPrice: fill.price,
+                        initial_margin: payload.initial_margin,
+                        leverage: 1,
+                    }
+                });
+            } else {
+                //increase the position by weighted average
+                const total_quantity = new Prisma.Decimal(counter_position.quantity).add(new Prisma.Decimal(fill.filled_quantity));
+                const weighted_entry_price = new Prisma.Decimal(counter_position.entryPrice).mul(new Prisma.Decimal(counter_position.quantity)).add(new Prisma.Decimal(fill.price).mul(new Prisma.Decimal(fill.filled_quantity))).div(total_quantity);
+
+                await prisma.position.update({
+                    where: {
+                        id: counter_position.id
+                    },
+                    data: {
+                        quantity: total_quantity,
+                        entryPrice: weighted_entry_price,
+                        initial_margin: new Prisma.Decimal(counter_position.initial_margin).add(payload.initial_margin),
+                    }
+                });
+            }
+            console.log("opposite side  position updated");
         }
+
         console.log("asset_balance updated");
     }
 
@@ -542,4 +889,3 @@ while (1) {
         await createORUpdateLeverage(parsed_leverage_req);
     }
 }
-

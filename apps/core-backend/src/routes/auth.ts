@@ -210,12 +210,26 @@ router.post('/api/auth/admin/signin', async (req, res) => {
     }
 });
 
-router.get('/api/me', userAuthMiddleware, (req: any, res) => {
-    const user = req.user;
+router.get('/api/me', userAuthMiddleware, async (req: any, res) => {
+    try {
+        const user = req.user;
 
-    console.log({ user });
+        console.log({ user });
 
-    res.json({ message: 'User fetched successfully', user: user });
+        const leverage = await prisma.leverage.findFirst({
+            where: {
+                user_id: user
+            }
+        })
+
+        res.json({ message: 'User fetched successfully', user_id: user, leverage: leverage?.limit || 0 });
+    } catch (error) {
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 });
 
 export default router;

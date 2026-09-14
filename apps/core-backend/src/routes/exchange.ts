@@ -1,11 +1,12 @@
 import express from 'express';
 import { BACKEND_ID, client, riskEngineclient, get_identifier, leverageClient } from '..';
 import { find_asset, find_market, get_balance } from '../middleware/exchange';
-import { prisma, Prisma } from 'database';
+import { prisma } from 'database';
 import { scaledDecimal } from 'shared-types';
 import { Order } from '../types/user';
 import { ZodError } from 'zod';
 import { createClient } from 'redis';
+import { Prisma, } from '../../generated/prisma/client';
 
 const router = express();
 
@@ -25,17 +26,6 @@ perpClient.connect();
 console.log('perpClient Connected');
 
 router.post('/api/exchange/spot/order', async (req, res) => {
-    //todo
-    // if user has wallet balance than than value they wanted to buy then throw error
-
-    //  if user has asset quantity less than they wanted to sell , then throw error
-
-    //if asset is not available on orderbook throw error
-
-    // //  publish to queue
-    //  wait until we got request identifier
-    //return filled quantity
-
     try {
         const req_body = req.body;
         const { type, side, quantity, price, symbol } = Order.parse(req_body);
@@ -174,7 +164,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 4);
+        const res_data = await spotClient.brPop(`response-queue-${BACKEND_ID}`, 0);
         console.log({ res_data });
 
         if (!res_data) {
@@ -204,16 +194,6 @@ router.post('/api/exchange/spot/order', async (req, res) => {
 });
 
 router.post('/api/exchange/future/order', async (req, res) => {
-    //todo
-    // if user has wallet balance than than value they wanted to buy then throw error
-
-    //  if user has asset quantity less than they wanted to sell , then throw error
-
-    //if asset is not available on orderbook throw error
-
-    // //  publish to queue
-    //  wait until we got request identifier
-    //return filled quantity
 
     try {
         const req_body = req.body;
@@ -230,7 +210,7 @@ router.post('/api/exchange/future/order', async (req, res) => {
         console.log({ mkt });
 
         if (!mkt) {
-            return res.status(404).json({ message: "Marekt not available" })
+            return res.status(404).json({ message: "Market not available" })
         }
 
         const asts = symbol.split(/_/);
@@ -254,6 +234,23 @@ router.post('/api/exchange/future/order', async (req, res) => {
 
         console.log({ base_ast, quote_ast });
 
+        //closing an existing perp position => opposing order reduces active position, no new margin locked
+        const existing_position = await prisma.position.findFirst({
+            where: {
+                user_id: user_id,
+                market_id: mkt.id
+            }
+        });
+
+        console.log({ existing_position });
+
+        const is_closing = existing_position && (
+            (existing_position.side == 'long' && side == 'sell') ||
+            (existing_position.side == 'short' && side == 'buy')
+        );
+
+        const command = is_closing ? 'close-position' : 'create-order';
+
         const request_id = crypto.randomUUID();
 
         console.log({ request_id });
@@ -268,6 +265,10 @@ router.post('/api/exchange/future/order', async (req, res) => {
         //The engine must reply to message.responseQueue and include the same correlationId.
 
         const payload: any = { type, quantity, price, symbol, side, user_id };
+        if (is_closing) {
+            payload.position_id = existing_position.id;
+            payload.initial_margin = existing_position.initial_margin;
+        }
 
         await riskEngineclient.lPush(
             `risk-engine-req-queue`,
@@ -275,7 +276,7 @@ router.post('/api/exchange/future/order', async (req, res) => {
                 BACKEND_ID,
                 request_id,
                 payload,
-                command: 'create-order',
+                command,
             }),
         );
 
@@ -319,79 +320,90 @@ router.post('/api/exchange/future/order', async (req, res) => {
 });
 
 router.get('/api/exchange/spot/order/:order_id', async (req, res) => {
-    //todo
-    //  sends get-order
 
-    const order_id = req.params.order_id;
-    const request_id = crypto.randomUUID();
+    try {
+        const order_id = req.params.order_id;
+        const request_id = crypto.randomUUID();
 
-    console.log({ order_id });
+        console.log({ order_id });
 
-    await client.lPush(
-        `incoming-request`,
-        JSON.stringify({
-            BACKEND_ID,
-            request_id,
-            payload: order_id,
-            command: 'get-order',
-        }),
-    );
+        await client.lPush(
+            `incoming-request`,
+            JSON.stringify({
+                BACKEND_ID,
+                request_id,
+                payload: order_id,
+                command: 'get-order',
+            }),
+        );
 
-    //  wait until we got request identifier
-    //return filled quantity
+        //  wait until we got request identifier
+        //return filled quantity
 
-    const res_data: any = await get_identifier('response-queue');
+        const res_data: any = await get_identifier('response-queue');
 
-    console.log({ res_data });
+        console.log({ res_data });
 
-    const parsed_res = JSON.parse(res_data?.element);
+        const parsed_res = JSON.parse(res_data?.element);
 
-    console.log({ parsed_res });
+        console.log({ parsed_res });
 
-    res.json({ message: 'order fetched successfully', data: parsed_res });
-});
+        res.json({ message: 'order fetched successfully', data: parsed_res });
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
 
-router.get('/api/exchange/spot/order/open', (req, res) => {
-    //todo
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 });
 
 router.delete('/api/exchange/spot/order/:order_id', async (req, res) => {
-    //  todo
-    //  sends cancel-order
 
-    const order_id = req.params.order_id;
-    const request_id = crypto.randomUUID();
+    try {
+        const order_id = req.params.order_id;
+        const request_id = crypto.randomUUID();
 
-    console.log({ order_id });
+        console.log({ order_id });
 
-    await client.lPush(
-        `incoming-request`,
-        JSON.stringify({
-            BACKEND_ID,
-            request_id,
-            payload: order_id,
-            command: 'cancel-order',
-        }),
-    );
+        await client.lPush(
+            `incoming-request`,
+            JSON.stringify({
+                BACKEND_ID,
+                request_id,
+                payload: order_id,
+                command: 'cancel-order',
+            }),
+        );
 
-    //  wait until we got request identifier
-    //return filled quantity
+        //  wait until we got request identifier
+        //return filled quantity
 
-    const res_data: any = await get_identifier('response-queue');
+        const res_data: any = await get_identifier('response-queue');
 
-    console.log({ res_data });
+        console.log({ res_data });
 
-    const parsed_res = JSON.parse(res_data?.element);
+        const parsed_res = JSON.parse(res_data?.element);
 
-    console.log({ parsed_res });
+        console.log({ parsed_res });
 
-    res.json({ message: parsed_res.status, data: parsed_res });
+        res.json({ message: parsed_res.status, data: parsed_res });
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
 });
 
 
 router.get('/api/exchange/depth/:symbol', (req, res) => {
     //todo
     //sends get-depth to engine
+    //aggregated orderbook {bids:[[price,size]...], asks:[[price,size]...], timestamp}
 });
 
 
@@ -399,37 +411,203 @@ router.post('/api/exchange/leverage', async (req, res) => {
     //send leverage update command to risk engine
     //get the confirmation
 
-    const req_body = req.body;
+    try {
+        const req_body = req.body;
 
-    const leverage = req_body.leverage;
+        const leverage = req_body.leverage;
 
-    console.log({ leverage });
+        console.log({ leverage });
 
-    const user_id = req.user;
-    console.log({ user_id });
+        const user_id = req.user;
+        console.log({ user_id });
 
-    const request_id = crypto.randomUUID();
+        const request_id = crypto.randomUUID();
 
+        await leverageClient.lPush(
+            `leverage-req-queue`,
+            JSON.stringify({
+                BACKEND_ID,
+                request_id,
+                payload: { leverage, user_id },
+                command: 'leverage-update',
+            }),
+        );
+        const res_data: any = await get_identifier('leverage-res-queue', false);
 
+        console.log({ res_data });
 
-    await leverageClient.lPush(
-        `leverage-req-queue`,
-        JSON.stringify({
-            BACKEND_ID,
-            request_id,
-            payload: { leverage, user_id },
-            command: 'leverage-update',
-        }),
-    );
-    const res_data: any = await get_identifier('leverage-res-queue', false);
+        const parsed_res = JSON.parse(res_data?.element);
 
-    console.log({ res_data });
+        console.log({ parsed_res });
 
-    const parsed_res = JSON.parse(res_data?.element);
+        res.json({ message: parsed_res.status, data: parsed_res });
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
 
-    console.log({ parsed_res });
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
+});
 
-    res.json({ message: parsed_res.status, data: parsed_res });
+router.get("/api/exchange/trades/:symbol", async (req, res) => {
+    try {
+        const symbol = req.params.symbol;
+        const user = req.user;
+
+        console.log({ symbol });
+
+        const fills = await prisma.fill.findMany({
+            where: {
+                symbol: symbol,
+            },
+            take: 20
+        });
+        console.log({ fills });
+
+        res.json({ message: "Trades fetched successfully", trades: fills })
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
+});
+
+router.get("/api/exchange/orders{/:status}", async (req, res) => {
+    //after order, db worker is not updating order table
+    //user's order history (open, filled, cancelled)
+    try {
+        const user = req.user;
+        const status = req.params.status;
+
+        if (status && status != 'open' && status != 'filled' && status != 'cancelled' && status !== "partially filled") {
+            return res.status(404).json({ message: "Invalid Order status" })
+        }
+
+        const orders = await prisma.order.findMany({
+            where: {
+                user_id: user
+            }
+        });
+
+        console.log({ orders });
+
+        const filtered_order = orders.filter(o => o.status == status);
+        console.log({ filtered_order });
+
+        res.json({ message: "Orders fetched successfully", orders: status ? filtered_order : orders })
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
+
+});
+
+router.get("/api/exchange/fills", async (req, res) => {
+    try {
+        const user = req.user;
+
+        const buy_fills = await prisma.fill.findMany({
+            where: {
+                buy_user_id: user,
+            },
+        });
+        const sell_fills = await prisma.fill.findMany({
+            where: {
+                sell_user_id: user,
+            },
+        })
+
+        res.json({ message: "Fill fetched successfully", fills: { buy_fills: buy_fills, sell_fills: sell_fills } })
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
+});
+
+router.get("/api/exchange/positions", async (req, res) => {
+    //current open perp positions for the user: symbol, side, size, entry_price, mark_price, uPnL, margin, leverage
+    try {
+        const user_id = req.user;
+
+        const positions = await prisma.position.findMany({
+            where: {
+                user_id: user_id
+            },
+            include: {
+                market: true
+            }
+        });
+
+        console.log({ positions });
+
+        const result = await Promise.all(positions.map(async (p) => {
+            const asts = p.market.symbol.split(/_/);
+            const ast = await find_asset(asts[0]);
+            const last_price = await prisma.assetPrice.findFirst({
+                where: {
+                    assetId: ast?.id
+                },
+                orderBy: {
+                    timestamp: 'desc'
+                }
+            });
+
+            const mark_price = Number(last_price?.mark_price || 0);
+            const entry_price = Number(p.entryPrice);
+            const quantity = Number(p.quantity);
+
+            const uPnL = p.side == 'long'
+                ? (mark_price - entry_price) * quantity
+                : (entry_price - mark_price) * quantity;
+
+            return {
+                id: p.id,
+                symbol: p.market.symbol,
+                side: p.side,
+                size: p.quantity,
+                entry_price: p.entryPrice,
+                mark_price: mark_price,
+                uPnL: uPnL,
+                margin: p.initial_margin,
+                leverage: p.leverage,
+            };
+        }));
+
+        res.json({ message: "Positions fetched successfully", positions: result });
+    } catch (error) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
+});
+
+router.get("/api/history/funding", async (req, res) => {
+    //todo
+    //NEED a funding table
+    //funding fee history.  funding-fee.ts computes and db-worker moves balances, but no FundingFee table is written — nothing is persisted. Add a FundingFee model + worker insert + endpoint.
+});
+
+router.get("api/history/liquidation", async (req, res) => {
+    //todo
+    //NEED a liquidation table
+    // liquidation events. liquidation.ts sends forced orders to the matching engine but persists nothing. 
+    // Add a Liquidation model + endpoint + WS push to the affected user
 });
 
 export default router;

@@ -218,6 +218,24 @@ export const risk_check_service = async () => {
                     console.log({ error });
 
                 }
+            } else if (parsed_req.command == 'close-position') {
+                //closing order => reduces active position, decreases systemic risk, so no new margin locked
+                //directly forward to matching engine
+                try {
+
+                    console.log("Risk engine approved closing order, move to matching engine");
+
+                    await matchineEngClient.lPush("risk-to-matching-eng", JSON.stringify({
+                        BACKEND_ID: parsed_req.BACKEND_ID,
+                        request_id: parsed_req.request_id,
+                        payload: parsed_req.payload,
+                        command: 'close-position',
+                    }))
+
+                } catch (error) {
+                    console.log({ error });
+
+                }
             }
         }
 

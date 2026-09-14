@@ -16,6 +16,7 @@ export let PRICES = new Map<string, {
 
 export const SHARED_ORDERBOOK = new Map<string, Orderbook>();
 export const SHARED_FILLS: Fill[] = [];
+export let SHARED_POSITIONS: any = [];
 
 const STREAM_NAME = 'index-prices:events';
 const GROUP_NAME = 'index-prices-processors';
@@ -139,6 +140,9 @@ export const shared_service = async () => {
 
             ASSETS = await prisma.asset.findMany();
             console.log({ ASSETS });
+
+            SHARED_POSITIONS = await prisma.position.findMany();
+            console.log({ SHARED_POSITIONS });
 
             price_stream = 'ready'
         }

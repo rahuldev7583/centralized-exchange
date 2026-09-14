@@ -30,7 +30,7 @@ export interface Fill {
     price: number;
     symbol: string;
     buy_user_id: string,
-    sell_user_Id: string,
+    sell_user_id: string,
 
     buy_order_id: string;
     sell_order_id: string;

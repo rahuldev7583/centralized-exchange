@@ -49,8 +49,9 @@ model User {
     asset      Asset_balance[]
     leverage   leverage[]
 
-    buyFill  Fill[] @relation("BuyFill")
-    sellFill Fill[] @relation("SellFill")
+    buyFill   Fill[]     @relation("BuyFill")
+    sellFill  Fill[]     @relation("SellFill")
+    positions Position[]
 }
 
 model Asset {
@@ -93,7 +94,8 @@ model Market {
 
     orders Order[]
 
-    type MarketType
+    type      MarketType
+    positions Position[]
 }
 
 model Asset_balance {
@@ -114,7 +116,7 @@ model Asset_balance {
 }
 
 model Order {
-    id       Int     @id @default(autoincrement())
+    id       String  @id
     type     String
     price    Decimal @db.Decimal(78, 0)
     quantity Int
@@ -138,21 +140,21 @@ model Order {
 }
 
 model Fill {
-    id       Int     @id @default(autoincrement())
+    id       String  @id
     type     String
     price    Decimal @db.Decimal(78, 0)
     quantity Int
     symbol   String
     status   String
 
-    ask_order_id Order @relation("AskOrder", fields: [ask_orderId], references: [id])
-    bid_order_id Order @relation("BidOrder", fields: [bid_orderId], references: [id])
+    ask_order Order @relation("AskOrder", fields: [ask_order_id], references: [id])
+    bid_order Order @relation("BidOrder", fields: [bid_order_id], references: [id])
 
     created_at DateTime @default(now())
     updated_at DateTime @updatedAt
 
-    ask_orderId Int
-    bid_orderId Int
+    ask_order_id String
+    bid_order_id String
 
     sell_user    User @relation("SellFill", fields: [sell_user_id], references: [user_id])
     sell_user_id Int
@@ -185,8 +187,30 @@ model AssetPrice {
     timestamp DateTime @db.Timestamptz()
 
     created_at DateTime @default(now())
-    asset      Asset?   @relation(fields: [assetId], references: [id])
-    assetId    Int?
+
+    asset   Asset? @relation(fields: [assetId], references: [id])
+    assetId Int?
 
     @@unique([assetId, timestamp])
+}
+
+model Position {
+    id        String @id @unique
+    user      User   @relation(fields: [user_id], references: [user_id])
+    user_id   Int
+    market    Market @relation(fields: [market_id], references: [id])
+    market_id Int
+
+    side     String
+    quantity Decimal @db.Decimal(78, 0)
+
+    entryPrice Decimal @db.Decimal(78, 0)
+
+    leverage       Int
+    initial_margin Decimal @db.Decimal(78, 0)
+
+    created_at DateTime @default(now())
+    updated_at DateTime @updatedAt
+
+    @@unique([user_id, market_id])
 }

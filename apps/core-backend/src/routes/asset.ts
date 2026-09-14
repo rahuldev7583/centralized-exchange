@@ -185,4 +185,49 @@ router.post('/api/exchange/market/add', adminAuthMiddleware, async (req, res) =>
     }
 });
 
+router.get('/api/exchange/markets', async (req, res) => {
+    try {
+        const existing_markets = await prisma.market.findMany({});
+        if (!existing_markets) {
+            return res.status(404).json({ message: 'Market not found' });
+        }
+        return res.status(201).json({
+            message: 'Market fetched successfully',
+            markets: existing_markets
+        });
+
+    } catch (error: any) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
+});
+
+router.get("/api/tickers/:symbol", async (req, res) => {
+    //todo
+    // last price, 24h change %, 24h volume, best bid/ask. Needs last_traded_price (exists on Asset) + a small agg over recent fills.
+})
+
+router.get("/api/get/tickers", async (req, res) => {
+    //todo
+    // last price, 24h change %, 24h volume, best bid/ask. Needs last_traded_price (exists on Asset) + a small agg over recent fills.
+})
+
+//router.get("/api/market/candles/:symbol?interval=1m|5m|1h|1d&from&to&limit", async (req, res) => {
+//    //todo
+//    // OHLCV for TradingView. Backed by TimescaleDB
+//})
+
+
+router.get("/api/history/balances", async (req, res) => {
+    //OPT
+    //todo
+    //deposits/withdrawals/trades/transfers. 
+    // No Transaction/BalanceHistory table exists. 
+    // Add one, written on onramp, offramp, and settlement.
+})
+
 export default router;

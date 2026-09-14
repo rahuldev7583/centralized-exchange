@@ -8,7 +8,7 @@ export const adminAuthMiddleware = (req: any, res: Response, next: NextFunction)
 
     try {
         if (!token) {
-            return res.status(404).json({ message: 'Token not provided' });
+            return res.status(404).json({ message: 'Auth Token not provided' });
         }
         if (!SECRET_KEY) {
             return res.status(404).json('SECRET_KEY not defined');

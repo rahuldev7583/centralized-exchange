@@ -14,13 +14,20 @@ router.post('/api/wallet/onramp', async (req, res) => {
     const { currency, amount } = req.body;
     //increase usd amount
 
+    if (amount > 0) {
+        return res.status(404).json({ message: "Invalid amount" })
+    }
+    if (currency.length > 0) {
+        return res.status(404).json({ message: "Invalid currency" })
+    }
+
     //call onramp service and add amount to user wallet
     console.log('on ramp called');
     const user_id = req.user;
     console.log({ user_id });
 
     if (!user_id) {
-        return;
+        return res.status(404).json({ message: "User not found" })
     }
     try {
         const assets = await prisma.asset_balance.findMany({
@@ -199,15 +206,11 @@ router.post('/api/wallet/offramp', async (req, res) => {
 });
 
 router.get('/api/wallet/balance', async (req, res) => {
-    //usd and other asset balance
-    //todo
-    //  sends get-user-balance to engine
-    //  include usd and all assets balance
     const user_id = req.user;
     console.log({ user_id });
 
     if (!user_id) {
-        return;
+        return res.status(404).json({ message: "User not found" })
     }
     try {
         const ast_balances = [];
