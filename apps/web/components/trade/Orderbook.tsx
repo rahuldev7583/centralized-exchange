@@ -6,6 +6,7 @@ import { useMarket } from "@/context/MarketContext";
 import { wsClient } from "@/lib/ws";
 import { formatPrice, formatQuantity } from "@/lib/format";
 import type { DepthEntry } from "@/lib/types";
+import { cx, emptyState, panel, panelHeader, panelTitle } from "@/lib/ui";
 
 interface Props {
   onPriceSelect?: (price: number) => void;
@@ -128,21 +129,28 @@ export function Orderbook({ onPriceSelect, rows = 12, variant = "panel" }: Props
 
   if (!symbol) {
     return variant === "panel" ? (
-      <div className="panel">
-        <div className="panel-header"><span className="panel-title">Orderbook</span></div>
-        <div className="empty-state">No market selected</div>
+      <div className={panel}>
+        <div className={panelHeader}><span className={panelTitle}>Orderbook</span></div>
+        <div className={emptyState}>No market selected</div>
       </div>
     ) : (
-      <div className="empty-state">No market selected</div>
+      <div className={emptyState}>No market selected</div>
     );
   }
 
+  const row =
+    "relative grid h-6 cursor-pointer grid-cols-3 items-center px-3 py-[3px] hover:bg-panel-hover";
+  const rowEmpty = "cursor-default hover:bg-transparent";
+  const depth = "absolute inset-y-0 right-0 opacity-[0.12]";
+  const cell = "relative z-[1]";
+  const cellRight = "relative z-[1] text-right text-text-dim";
+
   const Core = (
-    <div className="orderbook">
-        <div className="orderbook-head">
+    <div className="font-mono text-[13.5px] max-md:text-[12.5px]">
+        <div className="grid grid-cols-3 border-b border-border px-3 py-2 text-[12px] font-semibold uppercase tracking-wider text-text-faint">
           <span>Price</span>
-          <span style={{ textAlign: "right" }}>Size</span>
-          <span style={{ textAlign: "right" }}>Total</span>
+          <span className="text-right">Size</span>
+          <span className="text-right">Total</span>
         </div>
 
         <div>
@@ -150,26 +158,26 @@ export function Orderbook({ onPriceSelect, rows = 12, variant = "panel" }: Props
             let cum = 0;
             return visibleAsks.map((a, i) => {
               if (!a) {
-                return <div key={`a-pad-${i}`} className="orderbook-row empty" />;
+                return <div key={`a-pad-${i}`} className={cx(row, rowEmpty)} />;
               }
               cum += a.size;
               return (
                 <div
                   key={`a-${a.price}-${i}`}
-                  className="orderbook-row"
+                  className={row}
                   onClick={() => onPriceSelect?.(a.price)}
                 >
-                  <span className="orderbook-depth ask" style={{ width: `${(cum / maxTotal) * 100}%` }} />
-                  <span className="ob-price ask">{formatPrice(a.price)}</span>
-                  <span className="ob-size">{formatQuantity(a.size)}</span>
-                  <span className="ob-total">{formatQuantity(cum)}</span>
+                  <span className={cx(depth, "bg-down")} style={{ width: `${(cum / maxTotal) * 100}%` }} />
+                  <span className={cx(cell, "text-down")}>{formatPrice(a.price)}</span>
+                  <span className={cellRight}>{formatQuantity(a.size)}</span>
+                  <span className={cellRight}>{formatQuantity(cum)}</span>
                 </div>
               );
             });
           })()}
         </div>
 
-        <div className="orderbook-spread">
+        <div className="flex justify-between border-y border-border px-3 py-2 font-mono text-[12.5px] text-text-faint">
           <span>
             Spread {spread != null ? formatPrice(spread) : "-"}
           </span>
@@ -181,28 +189,28 @@ export function Orderbook({ onPriceSelect, rows = 12, variant = "panel" }: Props
             let cum = 0;
             return visibleBids.map((b, i) => {
               if (!b) {
-                return <div key={`b-pad-${i}`} className="orderbook-row empty" />;
+                return <div key={`b-pad-${i}`} className={cx(row, rowEmpty)} />;
               }
               cum += b.size;
               return (
                 <div
                   key={`b-${b.price}-${i}`}
-                  className="orderbook-row"
+                  className={row}
                   onClick={() => onPriceSelect?.(b.price)}
                 >
-                  <span className="orderbook-depth bid" style={{ width: `${(cum / maxTotal) * 100}%` }} />
-                  <span className="ob-price bid">{formatPrice(b.price)}</span>
-                  <span className="ob-size">{formatQuantity(b.size)}</span>
-                  <span className="ob-total">{formatQuantity(cum)}</span>
+                  <span className={cx(depth, "bg-up")} style={{ width: `${(cum / maxTotal) * 100}%` }} />
+                  <span className={cx(cell, "text-up")}>{formatPrice(b.price)}</span>
+                  <span className={cellRight}>{formatQuantity(b.size)}</span>
+                  <span className={cellRight}>{formatQuantity(cum)}</span>
                 </div>
               );
             });
           })()}
         </div>
 
-        <div className="orderbook-total">
+        <div className="flex justify-between border-t border-border px-3 py-2 font-mono text-[12.5px] text-text-faint">
           <span>Last</span>
-          <span className={lastPrice != null ? (lastPrice >= (mid ?? lastPrice) ? "up-text" : "down-text") : ""}>
+          <span className={lastPrice != null ? (lastPrice >= (mid ?? lastPrice) ? "text-up" : "text-down") : ""}>
             {lastPrice != null ? formatPrice(lastPrice) : "-"}
           </span>
         </div>
@@ -212,10 +220,10 @@ export function Orderbook({ onPriceSelect, rows = 12, variant = "panel" }: Props
   if (variant === "embedded") return Core;
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <span className="panel-title">Orderbook</span>
-        <span className="market-symbol" style={{ fontSize: 12 }}>{symbol}</span>
+    <div className={panel}>
+      <div className={panelHeader}>
+        <span className={panelTitle}>Orderbook</span>
+        <span className="text-[12px] font-bold tracking-wide">{symbol}</span>
       </div>
       {Core}
     </div>

@@ -14,6 +14,7 @@ import {
 import { api } from "@/lib/api";
 import { useMarket } from "@/context/MarketContext";
 import { wsClient } from "@/lib/ws";
+import { centerLoader, cx, panel, panelTitle, spinner } from "@/lib/ui";
 
 const INTERVALS = [
   { label: "1s", value: "1s", ms: 1_000 },
@@ -75,12 +76,12 @@ export function Chart() {
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#2ebd85",
-      downColor: "#f6465d",
-      borderUpColor: "#2ebd85",
-      borderDownColor: "#f6465d",
-      wickUpColor: "#2ebd85",
-      wickDownColor: "#f6465d",
+      upColor: "#00c087",
+      downColor: "#ec4545",
+      borderUpColor: "#00c087",
+      borderDownColor: "#ec4545",
+      wickUpColor: "#00c087",
+      wickDownColor: "#ec4545",
       priceFormat: { type: "price", precision: 4, minMove: 0.0001 },
     });
 
@@ -159,8 +160,8 @@ export function Chart() {
           value: c.volume,
           color:
             c.close >= c.open
-              ? "rgba(46,189,133,0.4)"
-              : "rgba(246,70,93,0.4)",
+              ? "rgba(0,192,135,0.4)"
+              : "rgba(236,69,69,0.4)",
         }));
 
         candleSeriesRef.current?.setData(candles);
@@ -211,7 +212,7 @@ export function Chart() {
       volumeSeriesRef.current?.update({
         time: t,
         value: candle.volume,
-        color: candle.close >= candle.open ? "rgba(46,189,133,0.4)" : "rgba(246,70,93,0.4)",
+        color: candle.close >= candle.open ? "rgba(0,192,135,0.4)" : "rgba(236,69,69,0.4)",
       });
     });
 
@@ -219,14 +220,17 @@ export function Chart() {
   }, [symbol]);
 
   return (
-    <div className="panel">
-      <div className="chart-toolbar">
-        <span className="panel-title">Chart</span>
-        <div className="chart-controls">
+    <div className={panel}>
+      <div className="flex items-center gap-1 border-b border-border px-3 py-[9px]">
+        <span className={panelTitle}>Chart</span>
+        <div className="ml-auto flex gap-1">
           {INTERVALS.map((iv) => (
             <button
               key={iv.value}
-              className={`chart-control ${interval === iv.value ? "active" : ""}`}
+              className={cx(
+                "cursor-pointer rounded-[7px] border-none bg-none px-[11px] py-1.5 text-[13.5px] font-semibold text-text-dim hover:text-text",
+                interval === iv.value && "bg-accent-bg text-accent",
+              )}
               onClick={() => setCandleInterval(iv.value)}
             >
               {iv.label}
@@ -234,13 +238,13 @@ export function Chart() {
           ))}
         </div>
       </div>
-      <div className="chart-wrap">
+      <div className="relative h-[380px] w-full md:h-[660px]">
         {loading && (
-          <div className="center-loader" style={{ position: "absolute", inset: 0, background: "var(--panel)" }}>
-            <span className="spinner" />
+          <div className={cx(centerLoader, "absolute inset-0 bg-panel")}>
+            <span className={spinner} />
           </div>
         )}
-        <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
+        <div ref={containerRef} className="h-full w-full" />
       </div>
     </div>
   );

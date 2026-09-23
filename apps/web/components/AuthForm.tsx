@@ -6,6 +6,16 @@ import { useToast } from "@/components/Toast";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ApiError } from "@/lib/api";
+import {
+  btn,
+  btnBlock,
+  btnPrimary,
+  cx,
+  formField,
+  formInput,
+  formLabel,
+  spinner,
+} from "@/lib/ui";
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   const [username, setUsername] = useState("");
@@ -36,14 +46,14 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
   };
 
   return (
-    <form className="auth-form" onSubmit={onSubmit}>
-      <div className="form-field">
-        <label className="form-label" htmlFor="username">
+    <form className="flex flex-col gap-4" onSubmit={onSubmit}>
+      <div className={formField}>
+        <label className={formLabel} htmlFor="username">
           Username
         </label>
         <input
           id="username"
-          className="form-input"
+          className={formInput}
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           placeholder="username"
@@ -53,13 +63,13 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           maxLength={20}
         />
       </div>
-      <div className="form-field">
-        <label className="form-label" htmlFor="password">
+      <div className={formField}>
+        <label className={formLabel} htmlFor="password">
           Password
         </label>
         <input
           id="password"
-          className="form-input"
+          className={formInput}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -70,21 +80,21 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           maxLength={20}
         />
       </div>
-      <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
-        {busy ? <span className="spinner" /> : mode === "login" ? "Sign in" : "Create account"}
+      <button className={cx(btn, btnPrimary, btnBlock)} type="submit" disabled={busy}>
+        {busy ? <span className={spinner} /> : mode === "login" ? "Sign in" : "Create account"}
       </button>
-      <div className="auth-switch">
+      <div className="mt-[18px] text-center text-[14.5px] text-text-dim">
         {mode === "login" ? (
           <>
             Don&apos;t have an account?{" "}
-            <Link className="auth-link" href="/auth/signup">
+            <Link className="cursor-pointer font-semibold text-accent" href="/auth/signup">
               Sign up
             </Link>
           </>
         ) : (
           <>
             Already have an account?{" "}
-            <Link className="auth-link" href="/auth/login">
+            <Link className="cursor-pointer font-semibold text-accent" href="/auth/login">
               Sign in
             </Link>
           </>

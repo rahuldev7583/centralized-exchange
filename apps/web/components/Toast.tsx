@@ -50,11 +50,21 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ toast }}>
       {children}
-      <div className="toast-viewport">
+      <div className="fixed right-4 top-[72px] z-[100] flex max-w-[380px] flex-col gap-2">
         {toasts.map((t) => (
-          <div key={t.id} className={`toast toast-${t.type}`} onClick={() => dismiss(t.id)}>
-            <div className="toast-title">{t.title}</div>
-            {t.message && <div className="toast-message">{t.message}</div>}
+          <div
+            key={t.id}
+            className={`animate-toast-in cursor-pointer rounded-xl border border-border-strong bg-panel px-[15px] py-[13px] shadow-[0_10px_28px_rgba(0,0,0,0.5)] ${
+              t.type === "success"
+                ? "border-l-[3px] border-l-up"
+                : t.type === "error"
+                  ? "border-l-[3px] border-l-down"
+                  : "border-l-[3px] border-l-accent"
+            }`}
+            onClick={() => dismiss(t.id)}
+          >
+            <div className="text-[14px] font-semibold">{t.title}</div>
+            {t.message && <div className="mt-0.5 text-[13px] text-text-dim">{t.message}</div>}
           </div>
         ))}
       </div>

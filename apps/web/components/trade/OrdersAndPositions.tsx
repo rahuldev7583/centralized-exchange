@@ -8,6 +8,22 @@ import { useToast } from "@/components/Toast";
 import { wsClient } from "@/lib/ws";
 import { formatPrice, formatQuantity, formatTime } from "@/lib/format";
 import type { Order, Position } from "@/lib/types";
+import {
+  actionBtn,
+  badge,
+  badgeVariants,
+  cx,
+  emptyState,
+  panel,
+  panelHeader,
+  tab,
+  table,
+  tableWrap,
+  tabs,
+  tabActive,
+  td,
+  th,
+} from "@/lib/ui";
 
 type Tab = "orders" | "positions" | "history";
 
@@ -16,7 +32,7 @@ export function OrdersAndPositions({ refreshKey }: { refreshKey: number }) {
   const { selected, isPerp } = { selected: market.selected, isPerp: market.selected?.type === "Perp" };
   const { user } = useAuth();
   const { toast } = useToast();
-  const [tab, setTab] = useState<Tab>("orders");
+  const [tab_, setTab] = useState<Tab>("orders");
   const [orders, setOrders] = useState<Order[]>([]);
   const [history, setHistory] = useState<Order[]>([]);
   const [positions, setPositions] = useState<Position[]>([]);
@@ -82,66 +98,66 @@ export function OrdersAndPositions({ refreshKey }: { refreshKey: number }) {
 
   const statusBadge = (status: string) => {
     const s = status.toLowerCase();
-    if (s.includes("cancel")) return "badge-cancelled";
-    if (s.includes("filled") && !s.includes("part")) return "badge-filled";
-    if (s.includes("part")) return "badge-partially";
-    return "badge-open";
+    if (s.includes("cancel")) return badgeVariants.cancelled;
+    if (s.includes("filled") && !s.includes("part")) return badgeVariants.filled;
+    if (s.includes("part")) return badgeVariants.partially;
+    return badgeVariants.open;
   };
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <div className="tabs">
-          <button className={`tab ${tab === "orders" ? "active" : ""}`} onClick={() => setTab("orders")}>
+    <div className={panel}>
+      <div className={panelHeader}>
+        <div className={tabs}>
+          <button className={cx(tab, tab_ === "orders" && tabActive)} onClick={() => setTab("orders")}>
             Open Orders
           </button>
-          <button className={`tab ${tab === "positions" ? "active" : ""}`} onClick={() => setTab("positions")}>
+          <button className={cx(tab, tab_ === "positions" && tabActive)} onClick={() => setTab("positions")}>
             Positions {isPerp ? "" : "(Spot)"}
           </button>
-          <button className={`tab ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")}>
+          <button className={cx(tab, tab_ === "history" && tabActive)} onClick={() => setTab("history")}>
             History
           </button>
         </div>
       </div>
 
-      {tab === "orders" && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="table">
+      {tab_ === "orders" && (
+        <div className={tableWrap}>
+          <table className={table}>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Market</th>
-                <th>Side</th>
-                <th>Type</th>
-                <th>Price</th>
-                <th>Qty</th>
-                <th>Filled</th>
-                <th></th>
+                <th className={th}>Time</th>
+                <th className={th}>Market</th>
+                <th className={th}>Side</th>
+                <th className={th}>Type</th>
+                <th className={th}>Price</th>
+                <th className={th}>Qty</th>
+                <th className={th}>Filled</th>
+                <th className={th}></th>
               </tr>
             </thead>
             <tbody>
               {orders.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="empty-state">
+                  <td colSpan={8} className={emptyState}>
                     No open orders
                   </td>
                 </tr>
               )}
               {orders.map((o) => (
                 <tr key={o.id}>
-                  <td>{formatTime(o.created_at)}</td>
-                  <td>{marketSymbol.get(o.market_id) ?? o.market_id}</td>
-                  <td>
-                    <span className={`badge ${o.side === "buy" ? "badge-buy" : "badge-sell"}`}>
+                  <td className={td}>{formatTime(o.created_at)}</td>
+                  <td className={td}>{marketSymbol.get(o.market_id) ?? o.market_id}</td>
+                  <td className={td}>
+                    <span className={cx(badge, o.side === "buy" ? badgeVariants.buy : badgeVariants.sell)}>
                       {o.side}
                     </span>
                   </td>
-                  <td>{o.type}</td>
-                  <td>{formatPrice(o.price)}</td>
-                  <td>{formatQuantity(o.quantity)}</td>
-                  <td>{formatQuantity(o.filled)}</td>
-                  <td>
-                    <button className="action-btn" onClick={() => cancelOrder(o.id)}>
+                  <td className={td}>{o.type}</td>
+                  <td className={td}>{formatPrice(o.price)}</td>
+                  <td className={td}>{formatQuantity(o.quantity)}</td>
+                  <td className={td}>{formatQuantity(o.filled)}</td>
+                  <td className={td}>
+                    <button className={actionBtn} onClick={() => cancelOrder(o.id)}>
                       Cancel
                     </button>
                   </td>
@@ -152,25 +168,25 @@ export function OrdersAndPositions({ refreshKey }: { refreshKey: number }) {
         </div>
       )}
 
-      {tab === "positions" && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="table">
+      {tab_ === "positions" && (
+        <div className={tableWrap}>
+          <table className={table}>
             <thead>
               <tr>
-                <th>Market</th>
-                <th>Side</th>
-                <th>Size</th>
-                <th>Entry</th>
-                <th>Mark</th>
-                <th>uPnL</th>
-                <th>Margin</th>
-                <th>Leverage</th>
+                <th className={th}>Market</th>
+                <th className={th}>Side</th>
+                <th className={th}>Size</th>
+                <th className={th}>Entry</th>
+                <th className={th}>Mark</th>
+                <th className={th}>uPnL</th>
+                <th className={th}>Margin</th>
+                <th className={th}>Leverage</th>
               </tr>
             </thead>
             <tbody>
               {positions.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="empty-state">
+                  <td colSpan={8} className={emptyState}>
                     No open positions
                   </td>
                 </tr>
@@ -179,18 +195,18 @@ export function OrdersAndPositions({ refreshKey }: { refreshKey: number }) {
                 const pnl = Number(p.uPnL);
                 return (
                   <tr key={p.id}>
-                    <td>{p.symbol}</td>
-                    <td>
-                      <span className={`badge ${p.side === "long" ? "badge-long" : "badge-short"}`}>
+                    <td className={td}>{p.symbol}</td>
+                    <td className={td}>
+                      <span className={cx(badge, p.side === "long" ? badgeVariants.long : badgeVariants.short)}>
                         {p.side}
                       </span>
                     </td>
-                    <td>{formatQuantity(p.size)}</td>
-                    <td>{formatPrice(p.entry_price)}</td>
-                    <td>{formatPrice(p.mark_price)}</td>
-                    <td className={pnl >= 0 ? "up-text" : "down-text"}>{pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}</td>
-                    <td>{formatQuantity(p.margin)}</td>
-                    <td>{p.leverage}x</td>
+                    <td className={td}>{formatQuantity(p.size)}</td>
+                    <td className={td}>{formatPrice(p.entry_price)}</td>
+                    <td className={td}>{formatPrice(p.mark_price)}</td>
+                    <td className={cx(td, pnl >= 0 ? "text-up" : "text-down")}>{pnl >= 0 ? "+" : ""}{pnl.toFixed(2)}</td>
+                    <td className={td}>{formatQuantity(p.margin)}</td>
+                    <td className={td}>{p.leverage}x</td>
                   </tr>
                 );
               })}
@@ -199,42 +215,42 @@ export function OrdersAndPositions({ refreshKey }: { refreshKey: number }) {
         </div>
       )}
 
-      {tab === "history" && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="table">
+      {tab_ === "history" && (
+        <div className={tableWrap}>
+          <table className={table}>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Market</th>
-                <th>Side</th>
-                <th>Type</th>
-                <th>Price</th>
-                <th>Qty</th>
-                <th>Status</th>
+                <th className={th}>Time</th>
+                <th className={th}>Market</th>
+                <th className={th}>Side</th>
+                <th className={th}>Type</th>
+                <th className={th}>Price</th>
+                <th className={th}>Qty</th>
+                <th className={th}>Status</th>
               </tr>
             </thead>
             <tbody>
               {history.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="empty-state">
+                  <td colSpan={7} className={emptyState}>
                     No order history
                   </td>
                 </tr>
               )}
               {history.slice(0, 30).map((o) => (
                 <tr key={o.id}>
-                  <td>{formatTime(o.created_at)}</td>
-                  <td>{marketSymbol.get(o.market_id) ?? o.market_id}</td>
-                  <td>
-                    <span className={`badge ${o.side === "buy" ? "badge-buy" : "badge-sell"}`}>
+                  <td className={td}>{formatTime(o.created_at)}</td>
+                  <td className={td}>{marketSymbol.get(o.market_id) ?? o.market_id}</td>
+                  <td className={td}>
+                    <span className={cx(badge, o.side === "buy" ? badgeVariants.buy : badgeVariants.sell)}>
                       {o.side}
                     </span>
                   </td>
-                  <td>{o.type}</td>
-                  <td>{formatPrice(o.price)}</td>
-                  <td>{formatQuantity(o.quantity)}</td>
-                  <td>
-                    <span className={`badge ${statusBadge(o.status)}`}>{o.status}</span>
+                  <td className={td}>{o.type}</td>
+                  <td className={td}>{formatPrice(o.price)}</td>
+                  <td className={td}>{formatQuantity(o.quantity)}</td>
+                  <td className={td}>
+                    <span className={cx(badge, statusBadge(o.status))}>{o.status}</span>
                   </td>
                 </tr>
               ))}

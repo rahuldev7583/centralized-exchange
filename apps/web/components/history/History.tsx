@@ -4,11 +4,28 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { formatPrice, formatQuantity, formatTime } from "@/lib/format";
 import type { BalanceHistory, FillHistory, FundingFee, Liquidation } from "@/lib/types";
+import {
+  actionBtn,
+  badge,
+  badgeVariants,
+  cx,
+  emptyState,
+  panel,
+  panelHeader,
+  spinner,
+  tab,
+  table,
+  tableWrap,
+  tabs,
+  tabActive,
+  td,
+  th,
+} from "@/lib/ui";
 
 type Tab = "balances" | "trades" | "funding" | "liquidations";
 
 export function History() {
-  const [tab, setTab] = useState<Tab>("balances");
+  const [tab_, setTab] = useState<Tab>("balances");
   const [balances, setBalances] = useState<BalanceHistory[]>([]);
   const [trades, setTrades] = useState<FillHistory[]>([]);
   const [funding, setFunding] = useState<FundingFee[]>([]);
@@ -40,56 +57,56 @@ export function History() {
   }, [load]);
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <div className="tabs">
-          <button className={`tab ${tab === "balances" ? "active" : ""}`} onClick={() => setTab("balances")}>
+    <div className={panel}>
+      <div className={panelHeader}>
+        <div className={tabs}>
+          <button className={cx(tab, tab_ === "balances" && tabActive)} onClick={() => setTab("balances")}>
             Balances
           </button>
-          <button className={`tab ${tab === "trades" ? "active" : ""}`} onClick={() => setTab("trades")}>
+          <button className={cx(tab, tab_ === "trades" && tabActive)} onClick={() => setTab("trades")}>
             Trades
           </button>
-          <button className={`tab ${tab === "funding" ? "active" : ""}`} onClick={() => setTab("funding")}>
+          <button className={cx(tab, tab_ === "funding" && tabActive)} onClick={() => setTab("funding")}>
             Funding
           </button>
-          <button className={`tab ${tab === "liquidations" ? "active" : ""}`} onClick={() => setTab("liquidations")}>
+          <button className={cx(tab, tab_ === "liquidations" && tabActive)} onClick={() => setTab("liquidations")}>
             Liquidations
           </button>
         </div>
-        <button className="action-btn" onClick={load}>
-          {loading ? <span className="spinner" /> : "Refresh"}
+        <button className={actionBtn} onClick={load}>
+          {loading ? <span className={spinner} /> : "Refresh"}
         </button>
       </div>
 
-      {tab === "balances" && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="table">
+      {tab_ === "balances" && (
+        <div className={tableWrap}>
+          <table className={table}>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Asset</th>
-                <th>Type</th>
-                <th>Amount</th>
+                <th className={th}>Time</th>
+                <th className={th}>Asset</th>
+                <th className={th}>Type</th>
+                <th className={th}>Amount</th>
               </tr>
             </thead>
             <tbody>
               {balances.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="empty-state">No balance history</td>
+                  <td colSpan={4} className={emptyState}>No balance history</td>
                 </tr>
               )}
               {balances.map((b) => {
                 const amt = Number(b.amount);
                 return (
                   <tr key={b.id}>
-                    <td>{formatTime(b.created_at)}</td>
-                    <td>{b.symbol}</td>
-                    <td>
-                      <span className={`badge ${b.type === "deposit" ? "badge-filled" : "badge-cancelled"}`}>
+                    <td className={td}>{formatTime(b.created_at)}</td>
+                    <td className={td}>{b.symbol}</td>
+                    <td className={td}>
+                      <span className={cx(badge, b.type === "deposit" ? badgeVariants.filled : badgeVariants.cancelled)}>
                         {b.type}
                       </span>
                     </td>
-                    <td className={amt >= 0 ? "up-text" : "down-text"}>
+                    <td className={cx(td, amt >= 0 ? "text-up" : "text-down")}>
                       {amt >= 0 ? "+" : ""}{formatQuantity(amt)} {b.symbol}
                     </td>
                   </tr>
@@ -100,40 +117,40 @@ export function History() {
         </div>
       )}
 
-      {tab === "trades" && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="table">
+      {tab_ === "trades" && (
+        <div className={tableWrap}>
+          <table className={table}>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Market</th>
-                <th>Side</th>
-                <th>Type</th>
-                <th>Price</th>
-                <th>Qty</th>
-                <th>Status</th>
+                <th className={th}>Time</th>
+                <th className={th}>Market</th>
+                <th className={th}>Side</th>
+                <th className={th}>Type</th>
+                <th className={th}>Price</th>
+                <th className={th}>Qty</th>
+                <th className={th}>Status</th>
               </tr>
             </thead>
             <tbody>
               {trades.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="empty-state">No trade history</td>
+                  <td colSpan={7} className={emptyState}>No trade history</td>
                 </tr>
               )}
               {trades.slice(0, 50).map((t, i) => (
                 <tr key={`${t.id}-${i}`}>
-                  <td>{formatTime(t.created_at)}</td>
-                  <td>{t.symbol}</td>
-                  <td>
-                    <span className={`badge ${t.side === "buy" ? "badge-buy" : "badge-sell"}`}>
+                  <td className={td}>{formatTime(t.created_at)}</td>
+                  <td className={td}>{t.symbol}</td>
+                  <td className={td}>
+                    <span className={cx(badge, t.side === "buy" ? badgeVariants.buy : badgeVariants.sell)}>
                       {t.side}
                     </span>
                   </td>
-                  <td>{t.type}</td>
-                  <td>{formatPrice(t.price)}</td>
-                  <td>{formatQuantity(t.quantity)}</td>
-                  <td>
-                    <span className="badge badge-filled">{t.status}</span>
+                  <td className={td}>{t.type}</td>
+                  <td className={td}>{formatPrice(t.price)}</td>
+                  <td className={td}>{formatQuantity(t.quantity)}</td>
+                  <td className={td}>
+                    <span className={cx(badge, badgeVariants.filled)}>{t.status}</span>
                   </td>
                 </tr>
               ))}
@@ -142,37 +159,37 @@ export function History() {
         </div>
       )}
 
-      {tab === "funding" && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="table">
+      {tab_ === "funding" && (
+        <div className={tableWrap}>
+          <table className={table}>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Market</th>
-                <th>Side</th>
-                <th>Funding Rate</th>
-                <th>Fee</th>
+                <th className={th}>Time</th>
+                <th className={th}>Market</th>
+                <th className={th}>Side</th>
+                <th className={th}>Funding Rate</th>
+                <th className={th}>Fee</th>
               </tr>
             </thead>
             <tbody>
               {funding.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="empty-state">No funding history</td>
+                  <td colSpan={5} className={emptyState}>No funding history</td>
                 </tr>
               )}
               {funding.map((f) => {
                 const fee = Number(f.funding_fee);
                 return (
                   <tr key={f.id}>
-                    <td>{formatTime(f.created_at)}</td>
-                    <td>{f.symbol}</td>
-                    <td>
-                      <span className={`badge ${f.side === "long" ? "badge-long" : "badge-short"}`}>
+                    <td className={td}>{formatTime(f.created_at)}</td>
+                    <td className={td}>{f.symbol}</td>
+                    <td className={td}>
+                      <span className={cx(badge, f.side === "long" ? badgeVariants.long : badgeVariants.short)}>
                         {f.side}
                       </span>
                     </td>
-                    <td>{formatPrice(f.funding_rate)}</td>
-                    <td className={fee >= 0 ? "up-text" : "down-text"}>
+                    <td className={td}>{formatPrice(f.funding_rate)}</td>
+                    <td className={cx(td, fee >= 0 ? "text-up" : "text-down")}>
                       {fee >= 0 ? "+" : ""}{fee.toFixed(6)}
                     </td>
                   </tr>
@@ -183,35 +200,35 @@ export function History() {
         </div>
       )}
 
-      {tab === "liquidations" && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="table">
+      {tab_ === "liquidations" && (
+        <div className={tableWrap}>
+          <table className={table}>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Market</th>
-                <th>Side</th>
-                <th>Qty</th>
-                <th>Price</th>
+                <th className={th}>Time</th>
+                <th className={th}>Market</th>
+                <th className={th}>Side</th>
+                <th className={th}>Qty</th>
+                <th className={th}>Price</th>
               </tr>
             </thead>
             <tbody>
               {liquidations.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="empty-state">No liquidations</td>
+                  <td colSpan={5} className={emptyState}>No liquidations</td>
                 </tr>
               )}
               {liquidations.map((l) => (
                 <tr key={l.id}>
-                  <td>{formatTime(l.created_at)}</td>
-                  <td>{l.symbol}</td>
-                  <td>
-                    <span className={`badge ${l.side === "long" ? "badge-long" : "badge-short"}`}>
+                  <td className={td}>{formatTime(l.created_at)}</td>
+                  <td className={td}>{l.symbol}</td>
+                  <td className={td}>
+                    <span className={cx(badge, l.side === "long" ? badgeVariants.long : badgeVariants.short)}>
                       {l.side}
                     </span>
                   </td>
-                  <td>{formatQuantity(l.quantity)}</td>
-                  <td>{formatPrice(l.price)}</td>
+                  <td className={td}>{formatQuantity(l.quantity)}</td>
+                  <td className={td}>{formatPrice(l.price)}</td>
                 </tr>
               ))}
             </tbody>

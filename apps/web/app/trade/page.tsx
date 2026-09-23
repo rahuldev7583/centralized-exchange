@@ -8,6 +8,7 @@ import { BookTrades } from "@/components/trade/BookTrades";
 import { OrderForm } from "@/components/trade/OrderForm";
 import { OrdersAndPositions } from "@/components/trade/OrdersAndPositions";
 import { formatPrice, formatPercent, formatCompact } from "@/lib/format";
+import { centerLoader, cx, spinner } from "@/lib/ui";
 
 export default function TradePage({ params }: { params: { symbol?: string } }) {
   const { selected, select, selectedTicker, refresh } = useMarket();
@@ -42,8 +43,8 @@ export default function TradePage({ params }: { params: { symbol?: string } }) {
 
   if (!selected) {
     return (
-      <div className="center-loader">
-        <span className="spinner" />
+      <div className={centerLoader}>
+        <span className={spinner} />
         Loading markets...
       </div>
     );
@@ -54,45 +55,55 @@ export default function TradePage({ params }: { params: { symbol?: string } }) {
 
   return (
     <div>
-      <div className="trade-header">
-        <div className="trade-price-block">
-          <span style={{ display: "inline-flex", alignSelf: "center" }}>
+      <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2.5 lg:gap-3">
+        <div className="flex items-baseline gap-3">
+          <span className="inline-flex self-center">
             <CoinIcon symbol={selected.symbol} size={28} />
           </span>
-          <span className="trade-price" style={{ color: changeUp ? "var(--up)" : "var(--down)" }}>
+          <span
+            className={cx(
+              "font-mono text-[30px] font-bold tracking-tight max-md:text-2xl max-[520px]:text-[21px]",
+              changeUp ? "text-up" : "text-down",
+            )}
+          >
             {formatPrice(stats?.last)}
           </span>
-          <span className={`stat-value ${changeUp ? "up-text" : "down-text"}`} style={{ fontSize: 14 }}>
+          <span
+            className={cx(
+              "font-mono text-[15px]",
+              changeUp ? "text-up" : "text-down",
+            )}
+          >
             {formatPercent(stats?.change)}
           </span>
         </div>
-        <div className="trade-stats">
-          <div className="stat-item">
-            <span className="stat-label">24h Volume</span>
-            <span className="stat-value">{formatCompact(stats?.volume)} {stats?.base}</span>
+        <div className="flex flex-wrap items-center gap-4 lg:gap-[22px]">
+          <div className="flex flex-col gap-[3px]">
+            <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-text-faint">24h Volume</span>
+            <span className="font-mono text-[15px]">{formatCompact(stats?.volume)} {stats?.base}</span>
           </div>
-          <div className="stat-item">
-            <span className="stat-label">Instrument</span>
-            <span className="stat-value">{isPerp ? "Perpetual" : "Spot"}</span>
+          <div className="flex flex-col gap-[3px]">
+            <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-text-faint">Instrument</span>
+            <span className="font-mono text-[15px]">{isPerp ? "Perpetual" : "Spot"}</span>
           </div>
         </div>
       </div>
 
-      <div className="trade-grid">
-        <div className="trade-chart-col">
+      <div className="grid grid-cols-1 items-start gap-2.5 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-3 xl:grid-cols-[minmax(0,1fr)_320px_350px]">
+        <div className="order-1">
           <Chart />
         </div>
 
-        <div className="trade-book-col">
+        <div className="order-3 lg:order-2">
           <BookTrades onPriceSelect={(p) => setPrice(p)} />
         </div>
 
-        <div className="trade-side-col" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="order-2 flex flex-col gap-2.5 lg:order-3 lg:max-xl:col-span-2">
           <OrderForm price={price} onOrderPlaced={() => setRefreshKey((k) => k + 1)} />
         </div>
       </div>
 
-      <div className="trade-bottom">
+      <div className="mt-3">
         <OrdersAndPositions refreshKey={refreshKey} />
       </div>
     </div>

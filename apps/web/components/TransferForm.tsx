@@ -6,6 +6,19 @@ import { useBalance } from "@/context/BalanceContext";
 import { useToast } from "@/components/Toast";
 import { useMarket } from "@/context/MarketContext";
 import { useRouter } from "next/navigation";
+import {
+  btn,
+  btnBlock,
+  btnPrimary,
+  cx,
+  formField,
+  formInput,
+  formLabel,
+  panel,
+  panelHeader,
+  panelTitle,
+  spinner,
+} from "@/lib/ui";
 
 export function TransferForm({ mode }: { mode: "onramp" | "offramp" }) {
   const [currency, setCurrency] = useState("USD");
@@ -51,18 +64,18 @@ export function TransferForm({ mode }: { mode: "onramp" | "offramp" }) {
   };
 
   return (
-    <div className="panel" style={{ maxWidth: 440 }}>
-      <div className="panel-header">
-        <span className="panel-title">{isDeposit ? "Deposit" : "Withdraw"}</span>
+    <div className={cx(panel, "max-w-[440px]")}>
+      <div className={panelHeader}>
+        <span className={panelTitle}>{isDeposit ? "Deposit" : "Withdraw"}</span>
       </div>
-      <form className="order-form" onSubmit={onSubmit}>
-        <div className="form-field">
-          <label className="form-label" htmlFor="currency">
+      <form className="flex flex-col gap-3 p-3.5" onSubmit={onSubmit}>
+        <div className={formField}>
+          <label className={formLabel} htmlFor="currency">
             Asset
           </label>
           <select
             id="currency"
-            className="form-input"
+            className={formInput}
             value={currency}
             onChange={(e) => setCurrency(e.target.value)}
           >
@@ -73,13 +86,13 @@ export function TransferForm({ mode }: { mode: "onramp" | "offramp" }) {
             ))}
           </select>
         </div>
-        <div className="form-field">
-          <label className="form-label" htmlFor="amount">
+        <div className={formField}>
+          <label className={formLabel} htmlFor="amount">
             Amount
           </label>
           <input
             id="amount"
-            className="form-input"
+            className={formInput}
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0.00"
@@ -87,10 +100,10 @@ export function TransferForm({ mode }: { mode: "onramp" | "offramp" }) {
             required
           />
         </div>
-        <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
-          {busy ? <span className="spinner" /> : isDeposit ? `Deposit ${currency}` : `Withdraw ${currency}`}
+        <button className={cx(btn, btnPrimary, btnBlock)} type="submit" disabled={busy}>
+          {busy ? <span className={spinner} /> : isDeposit ? `Deposit ${currency}` : `Withdraw ${currency}`}
         </button>
-        <div style={{ fontSize: 12, color: "var(--text-faint)", textAlign: "center" }}>
+        <div className="text-center text-[12px] text-text-faint">
           {isDeposit ? "Mock credit — funds are added instantly." : "Mock debit — funds are removed instantly."}
         </div>
       </form>

@@ -2,34 +2,45 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BackpackIcon } from "./BackpackLogo";
+import { BookIcon } from "./OBLogo";
+import { cx } from "@/lib/ui";
 
 function Item({ href, label, icon }: { href: string; label: string; icon?: React.ReactNode }) {
   const pathname = usePathname();
   const active = pathname === href || pathname.startsWith(href + "/");
   return (
-    <Link href={href} className={`side-item ${active ? "active" : ""}`}>
-      <span className="side-icon" aria-hidden>
+    <Link
+      href={href}
+      className={cx(
+        "my-0.5 flex items-center gap-[11px] rounded-[10px] px-3 py-[11px] text-[15px] font-medium text-text-dim transition-colors hover:bg-panel hover:text-text",
+        active && "bg-panel text-text shadow-[inset_0_0_0_1px_var(--border)]",
+      )}
+    >
+      <span className="flex size-5 items-center justify-center" aria-hidden>
         {icon ?? (
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="9" />
           </svg>
         )}
       </span>
-      <span className="side-label">{label}</span>
+      <span>{label}</span>
     </Link>
   );
 }
 
 export function Sidebar() {
   return (
-    <div className="side-wrap">
-      <div className="side-header">
-        <span className="side-brand"><BackpackIcon size={14} /> Backpack</span>
+    <div className="sticky top-[60px] flex h-[calc(100vh-60px)] flex-col px-3 py-3.5">
+      <div className="px-2.5 pb-3.5 pt-2 text-[13px] font-semibold text-text-dim">
+        <span className="inline-flex items-center gap-[7px] tracking-wide text-text-faint">
+          <BookIcon size={15} /> OB
+        </span>
       </div>
 
-      <div className="side-section">
-        <div className="side-section-title">Main</div>
+      <div className="mb-2.5">
+        <div className="px-2.5 py-2 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-text-faint">
+          Main
+        </div>
         <Item href="/trade" label="Trade" icon={(
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M3 3v18M3 19h18" />
@@ -51,8 +62,10 @@ export function Sidebar() {
         )} />
       </div>
 
-      <div className="side-section">
-        <div className="side-section-title">Transfers</div>
+      <div className="mb-2.5">
+        <div className="px-2.5 py-2 text-[11.5px] font-semibold uppercase tracking-[0.08em] text-text-faint">
+          Transfers
+        </div>
         <Item href="/onramp" label="Onramp" icon={(
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 19V5" />
@@ -67,10 +80,13 @@ export function Sidebar() {
         )} />
       </div>
 
-      <div className="side-spacer" />
+      <div className="flex-1" />
 
-      <div className="side-footer">
-        <button className="side-collapse" title="Collapse">
+      <div className="px-1 py-2">
+        <button
+          title="Collapse"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-[10px] border border-border bg-panel px-3 py-2.5 text-[14px] text-text-dim"
+        >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M8 12h8M8 8h8M8 16h8" />
           </svg>

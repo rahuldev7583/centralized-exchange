@@ -8,6 +8,22 @@ import { useBalance } from "@/context/BalanceContext";
 import { useToast } from "@/components/Toast";
 import { formatQuantity } from "@/lib/format";
 import type { OrderType, Side } from "@/lib/types";
+import {
+  btnBuy,
+  btnSell,
+  cx,
+  emptyState,
+  formField,
+  formHint,
+  formInput,
+  formLabel,
+  panel,
+  panelHeader,
+  panelTitle,
+  tab,
+  tabActive,
+  tabs,
+} from "@/lib/ui";
 
 const LEVERAGE_PRESETS = [1, 2, 5, 10, 20, 50];
 
@@ -144,19 +160,19 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
 
   if (!selected) {
     return (
-      <div className="panel">
-        <div className="empty-state">No market selected</div>
+      <div className={panel}>
+        <div className={emptyState}>No market selected</div>
       </div>
     );
   }
 
   if (!isAuthed) {
     return (
-      <div className="panel">
-        <div className="panel-header">
-          <span className="panel-title">Place Order</span>
+      <div className={panel}>
+        <div className={panelHeader}>
+          <span className={panelTitle}>Place Order</span>
         </div>
-        <div className="empty-state">Sign in to place orders</div>
+        <div className={emptyState}>Sign in to place orders</div>
       </div>
     );
   }
@@ -167,48 +183,56 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
   };
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <div className="tabs">
-          <button className={`tab ${type === "limit" ? "active" : ""}`} onClick={() => setType("limit")}>
+    <div className={panel}>
+      <div className={panelHeader}>
+        <div className={tabs}>
+          <button className={cx(tab, type === "limit" && tabActive)} onClick={() => setType("limit")}>
             Limit
           </button>
-          <button className={`tab ${type === "market" ? "active" : ""}`} onClick={() => setType("market")}>
+          <button className={cx(tab, type === "market" && tabActive)} onClick={() => setType("market")}>
             Market
           </button>
         </div>
         {isPerp && (
-          <span className="market-type-tag perp">Perp</span>
+          <span className="rounded-[5px] bg-up-bg px-[7px] py-[3px] text-[11px] font-bold uppercase tracking-wider text-up">
+            Perp
+          </span>
         )}
       </div>
 
-      <div className="order-form">
-        <div className="tabs" style={{ gap: 0 }}>
+      <div className="flex flex-col gap-3 p-3.5">
+        <div className="flex">
           <button
-            className={`tab tab-buy ${side === "buy" ? "active" : ""}`}
+            className={cx(
+              tab,
+              "flex-1 rounded-none border-b-2 py-2",
+              side === "buy" ? "border-b-up text-up" : "border-b-transparent",
+            )}
             onClick={() => setSide("buy")}
-            style={{ flex: 1, padding: "8px 0", borderBottom: side === "buy" ? "2px solid var(--up)" : "none" }}
           >
             Buy / Long
           </button>
           <button
-            className={`tab tab-sell ${side === "sell" ? "active" : ""}`}
+            className={cx(
+              tab,
+              "flex-1 rounded-none border-b-2 py-2",
+              side === "sell" ? "border-b-down text-down" : "border-b-transparent",
+            )}
             onClick={() => setSide("sell")}
-            style={{ flex: 1, padding: "8px 0", borderBottom: side === "sell" ? "2px solid var(--down)" : "none" }}
           >
             Sell / Short
           </button>
         </div>
 
         {isPerp && (
-          <div className="form-field">
-            <div className="form-label">
+          <div className={formField}>
+            <div className={formLabel}>
               <span>Leverage</span>
-              <span className="form-hint">Current: {leverage || 1}x</span>
+              <span className={formHint}>Current: {leverage || 1}x</span>
             </div>
-            <div className="leverage-row">
+            <div className="flex flex-wrap items-center gap-2">
               <input
-                className="leverage-input"
+                className="w-[76px] rounded-lg border border-border bg-bg-sunken px-2.5 py-[9px] font-mono text-[14.5px] text-text outline-none focus:border-accent"
                 value={levInput}
                 onChange={(e) => setLevInput(e.target.value.replace(/[^0-9.]/g, ""))}
                 onBlur={() => {
@@ -217,11 +241,14 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
                 }}
                 inputMode="decimal"
               />
-              <div className="leverage-presets">
+              <div className="flex flex-wrap gap-[5px]">
                 {LEVERAGE_PRESETS.map((lev) => (
                   <button
                     key={lev}
-                    className={`leverage-preset ${Number(levInput) === lev ? "active" : ""}`}
+                    className={cx(
+                      "cursor-pointer rounded-[7px] border border-border bg-none px-2.5 py-[7px] text-[12.5px] font-semibold text-text-dim hover:border-border-strong hover:text-text",
+                      Number(levInput) === lev && "border-accent bg-accent-bg text-accent",
+                    )}
                     onClick={() => handleLeveragePreset(lev)}
                   >
                     {lev}x
@@ -233,13 +260,13 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
         )}
 
         {type === "limit" && (
-          <div className="form-field">
-            <div className="form-label">
+          <div className={formField}>
+            <div className={formLabel}>
               <span>Price</span>
-              <span className="form-hint">{quoteSymbol}</span>
+              <span className={formHint}>{quoteSymbol}</span>
             </div>
             <input
-              className="form-input"
+              className={formInput}
               value={limitPrice}
               onChange={(e) => setLimitPrice(e.target.value)}
               placeholder={lastPrice ? String(lastPrice) : "0.00"}
@@ -248,13 +275,13 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
           </div>
         )}
 
-        <div className="form-field">
-          <div className="form-label">
+        <div className={formField}>
+          <div className={formLabel}>
             <span>Amount</span>
-            <span className="form-hint">{baseSymbol}</span>
+            <span className={formHint}>{baseSymbol}</span>
           </div>
           <input
-            className="form-input"
+            className={formInput}
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
             placeholder="0.00"
@@ -262,31 +289,35 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
           />
         </div>
 
-        <div className="percent-row">
+        <div className="flex gap-1.5">
           {[25, 50, 75, 100].map((p) => (
-            <button key={p} className="percent-btn" onClick={() => percentOfAvailable(p)}>
+            <button
+              key={p}
+              className="flex-1 cursor-pointer rounded-[7px] border border-border bg-none py-2 text-[13px] font-semibold text-text-dim transition-colors hover:border-border-strong hover:text-text"
+              onClick={() => percentOfAvailable(p)}
+            >
               {p}%
             </button>
           ))}
         </div>
 
-        <div className="form-field">
-          <div className="form-label">
+        <div className={formField}>
+          <div className={formLabel}>
             <span>Available</span>
-            <span className="form-hint">
+            <span className={formHint}>
               {side === "buy" ? `${formatQuantity(availableQuote)} ${quoteSymbol}` : `${formatQuantity(availableBase)} ${baseSymbol}`}
             </span>
           </div>
         </div>
 
-        <div className="order-total">
+        <div className="flex justify-between border-t border-border pb-0.5 pt-2.5 text-[13.5px] text-text-dim">
           <span>Est. {isPerp ? "Notional" : "Total"}</span>
-          <span className="order-total-value">
+          <span className="font-mono text-text">
             {notional > 0 ? `${notional.toFixed(2)} ${quoteSymbol}` : "-"}
           </span>
         </div>
 
-        <button className={side === "buy" ? "btn-buy" : "btn-sell"} onClick={submit} disabled={busy}>
+        <button className={side === "buy" ? btnBuy : btnSell} onClick={submit} disabled={busy}>
           {busy
             ? "Placing..."
             : isPerp
@@ -299,7 +330,7 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
         </button>
 
         {user && (
-          <div style={{ fontSize: 11, color: "var(--text-faint)", textAlign: "center" }}>
+          <div className="text-center text-[11px] text-text-faint">
             Signed in as {user.username}
           </div>
         )}

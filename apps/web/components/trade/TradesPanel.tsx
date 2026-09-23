@@ -6,6 +6,7 @@ import { useMarket } from "@/context/MarketContext";
 import { wsClient } from "@/lib/ws";
 import { formatPrice, formatQuantity, formatClockTime } from "@/lib/format";
 import type { PublicTrade } from "@/lib/types";
+import { emptyState, panel, panelHeader, panelTitle } from "@/lib/ui";
 
 export function TradesPanel({ variant = "panel" as const }: { variant?: "panel" | "embedded" }) {
   const { selected } = useMarket();
@@ -56,22 +57,22 @@ export function TradesPanel({ variant = "panel" as const }: { variant?: "panel" 
   }, [symbol, fetchTrades]);
 
   const Core = (
-    <div className="trades-list">
-        <div className="trades-head">
+    <div className="font-mono text-[13.5px] max-md:text-[12.5px]">
+        <div className="grid grid-cols-3 border-b border-border px-3 py-2 text-[12px] font-semibold uppercase tracking-wider text-text-faint">
           <span>Price</span>
-          <span style={{ textAlign: "right" }}>Size</span>
-          <span style={{ textAlign: "right" }}>Time</span>
+          <span className="text-right">Size</span>
+          <span className="text-right">Time</span>
         </div>
         {trades.length === 0 ? (
-          <div className="empty-state">No trades yet</div>
+          <div className={emptyState}>No trades yet</div>
         ) : (
           trades.map((t, i) => {
             const side = t.side === "sell" ? "sell" : "buy";
             return (
-              <div className="trades-row" key={`${t.id}-${i}`}>
-                <span className={`tr-price ${side}`}>{formatPrice(t.price)}</span>
-                <span className="tr-size">{formatQuantity(t.quantity)}</span>
-                <span className="tr-time">{formatClockTime(new Date(t.created_at).getTime())}</span>
+              <div className="grid grid-cols-3 px-3 py-1" key={`${t.id}-${i}`}>
+                <span className={side === "sell" ? "text-down" : "text-up"}>{formatPrice(t.price)}</span>
+                <span className="text-right text-text-dim">{formatQuantity(t.quantity)}</span>
+                <span className="text-right text-text-faint">{formatClockTime(new Date(t.created_at).getTime())}</span>
               </div>
             );
           })
@@ -82,9 +83,9 @@ export function TradesPanel({ variant = "panel" as const }: { variant?: "panel" 
   if (variant === "embedded") return Core;
 
   return (
-    <div className="panel">
-      <div className="panel-header">
-        <span className="panel-title">Market Trades</span>
+    <div className={panel}>
+      <div className={panelHeader}>
+        <span className={panelTitle}>Market Trades</span>
       </div>
       {Core}
     </div>

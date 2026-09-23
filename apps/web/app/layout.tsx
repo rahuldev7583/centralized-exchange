@@ -4,13 +4,13 @@ import "./globals.css";
 import { Providers } from "@/context/Providers";
 import { AppShell } from "@/components/AppShell";
 
-// Backpack uses Inter across its UI, including tabular-nums for prices/quantities.
+// OB uses Inter across its UI, including tabular-nums for prices/quantities.
 const geistSans = Inter({ subsets: ["latin"], variable: "--font-geist-sans", display: "swap" });
 const geistMono = Inter({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Backpack Exchange",
-  description: "Spot and perpetual futures trading",
+  title: "OB — Orderbook Exchange",
+  description: "Spot and perpetual futures trading on OB",
 };
 
 export default function RootLayout({
@@ -20,7 +20,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} max-w-screen overflow-x-hidden bg-bg font-sans text-[15px] leading-[1.5] text-text antialiased tabular-nums`}
+      >
         <Providers>
           <AppShell>{children}</AppShell>
         </Providers>
