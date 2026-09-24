@@ -7,7 +7,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ApiError } from "@/lib/api";
 import {
-  btn,
   btnBlock,
   btnPrimary,
   cx,
@@ -80,7 +79,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           maxLength={20}
         />
       </div>
-      <button className={cx(btn, btnPrimary, btnBlock)} type="submit" disabled={busy}>
+      <button className={cx(btnPrimary, btnBlock)} type="submit" disabled={busy}>
         {busy ? <span className={spinner} /> : mode === "login" ? "Sign in" : "Create account"}
       </button>
       <div className="mt-[18px] text-center text-[14.5px] text-text-dim">

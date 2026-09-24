@@ -7,7 +7,6 @@ import { useToast } from "@/components/Toast";
 import { useMarket } from "@/context/MarketContext";
 import { useRouter } from "next/navigation";
 import {
-  btn,
   btnBlock,
   btnPrimary,
   cx,
@@ -100,7 +99,7 @@ export function TransferForm({ mode }: { mode: "onramp" | "offramp" }) {
             required
           />
         </div>
-        <button className={cx(btn, btnPrimary, btnBlock)} type="submit" disabled={busy}>
+        <button className={cx(btnPrimary, btnBlock)} type="submit" disabled={busy}>
           {busy ? <span className={spinner} /> : isDeposit ? `Deposit ${currency}` : `Withdraw ${currency}`}
         </button>
         <div className="text-center text-[12px] text-text-faint">

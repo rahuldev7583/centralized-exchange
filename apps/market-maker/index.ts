@@ -21,6 +21,12 @@ const MIN_SPREAD_BPS = Number(process.env.MM_MIN_SPREAD_BPS || 20); // 20 bps =>
 const STEP = Number(process.env.MM_STEP || 10); // absolute price step per level
 const QTY = Number(process.env.MM_QTY || 0.002);
 const UPDATE_MS = Number(process.env.MM_UPDATE_MS || 300); // 200-500ms
+const ORDER_GAP_MS = Number(process.env.MM_ORDER_GAP_MS || 2000);
+const TAKER_USERNAME = process.env.MM_TAKER_USERNAME;
+const TAKER_PASSWORD = process.env.MM_TAKER_PASSWORD;
+const TAKER_QTY = Number(process.env.MM_TAKER_QTY || QTY);
+
+const TAKER_INTERVAL_MS = Number(process.env.MM_TAKER_INTERVAL_MS || 20_000);
 
 if (!API_BASE || !USERNAME || !PASSWORD) {
     throw new Error(
@@ -90,19 +96,19 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     return res.json() as Promise<T>;
 }
 
-async function signInOrUp(): Promise<string> {
+async function signInOrUp(username: string, password: string): Promise<string> {
     try {
         const login = await http<{ authToken: string }>(`/api/auth/signin`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
+            body: JSON.stringify({ username, password }),
         });
         return login.authToken;
     } catch {
         const signup = await http<{ authToken: string }>(`/api/auth/signup`, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ username: USERNAME, password: PASSWORD }),
+            body: JSON.stringify({ username, password }),
         });
         return signup.authToken;
     }
@@ -173,6 +179,29 @@ async function cancelOrder(token: string, orderId: number) {
     }
 }
 
+async function placeMarketOrder(
+    token: string,
+    symbol: string,
+    side: 'buy' | 'sell',
+    quantity: number,
+): Promise<number | null> {
+    const headers = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
+    try {
+        const res = await http<EngineOrderResponse>(`/api/exchange/spot/order`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ type: 'market', side, quantity, symbol }),
+        });
+        const orderId = res?.data?.order_id ?? res?.order_id ?? null;
+        const status = res?.data?.status ?? res?.status ?? '';
+        console.log(`taker market ${side} ${quantity} ${symbol} ->`, { orderId, status, message: res?.message });
+        return orderId;
+    } catch (e) {
+        console.error('placeMarketOrder error', { symbol, side, quantity, e });
+        return null;
+    }
+}
+
 class MarketState {
     readonly cfg: SymbolConfig;
     price: number | null = null; // last global price
@@ -185,10 +214,24 @@ async function run() {
     const symbols = parseSymbols();
 
     await waitForApi();
-    const token = await signInOrUp();
+    const token = await signInOrUp(USERNAME, PASSWORD);
 
     if (SHOULD_FUND) {
         await fundBalances(token, symbols);
+    }
+    const takerToken = TAKER_USERNAME && TAKER_PASSWORD
+        ? await signInOrUp(TAKER_USERNAME, TAKER_PASSWORD)
+        : undefined;
+    if (takerToken) {
+        console.log(`MarketMaker taker signed in as ${TAKER_USERNAME}`);
+        if (SHOULD_FUND) {
+            await fundBalances(takerToken, symbols);
+        }
+    } else {
+        console.log(
+            'MarketMaker running without a taker account (set MM_TAKER_USERNAME/MM_TAKER_PASSWORD) — ' +
+            'quotes will rest on the book but no trades will execute.',
+        );
     }
 
     const states = new Map<string, MarketState>();
@@ -225,6 +268,8 @@ async function run() {
 
     const halfSpread = (p: number) => (p * MIN_SPREAD_BPS) / 10000; // bps to fraction
 
+    let hasQuoted = false;
+
     async function refreshSymbol(st: MarketState) {
         if (st.placing) return;
         const p = st.price;
@@ -243,34 +288,40 @@ async function run() {
             const startBid = base - Math.max(minHalf, STEP);
             const startAsk = base + Math.max(minHalf, STEP);
 
-            const tasks: Promise<void>[] = [];
-            // Bids ladder
+            const ladder: Array<{ side: 'buy' | 'sell'; price: number }> = [];
             for (let i = 0; i < LEVELS; i++) {
-                const price = Math.max(0.0001, startBid - i * STEP);
-                tasks.push(
-                    (async () => {
-                        const id = await placeOrder(token, st.cfg.symbol, 'buy', Number(price.toFixed(2)), QTY);
-                        if (id) st.grid.push({ order_id: id, side: 'buy' });
-                    })(),
-                );
+                ladder.push({ side: 'buy', price: Math.max(0.0001, startBid - i * STEP) });
             }
-            // Asks ladder
             for (let i = 0; i < LEVELS; i++) {
-                const price = startAsk + i * STEP;
-                tasks.push(
-                    (async () => {
-                        const id = await placeOrder(token, st.cfg.symbol, 'sell', Number(price.toFixed(2)), QTY);
-                        if (id) st.grid.push({ order_id: id, side: 'sell' });
-                    })(),
-                );
+                ladder.push({ side: 'sell', price: startAsk + i * STEP });
             }
 
-            await Promise.all(tasks);
+            for (let j = 0; j < ladder.length; j++) {
+                const { side, price } = ladder[j];
+                const id = await placeOrder(token, st.cfg.symbol, side, Number(price.toFixed(2)), QTY);
+                if (id) {
+                    st.grid.push({ order_id: id, side });
+                    hasQuoted = true;
+                }
+                if (j < ladder.length - 1) await sleep(ORDER_GAP_MS);
+            }
         } catch (e) {
             console.error('refreshSymbol error', { symbol: st.cfg.symbol, e });
         } finally {
             st.placing = false;
         }
+    }
+
+    if (takerToken) {
+        setInterval(() => {
+            if (!hasQuoted) return;
+            void (async () => {
+                for (const st of states.values()) {
+                    await placeMarketOrder(takerToken, st.cfg.symbol, 'buy', TAKER_QTY);
+                    await placeMarketOrder(takerToken, st.cfg.symbol, 'sell', TAKER_QTY);
+                }
+            })();
+        }, TAKER_INTERVAL_MS);
     }
 
     // Main update loop

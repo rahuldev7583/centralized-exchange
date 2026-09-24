@@ -349,8 +349,12 @@ router.get("/api/market/candles/:symbol", async (req, res) => {
         const to = req.query.to ? Number(req.query.to) : undefined;
 
         const interval_ms: any = {
+            '1s': 1000,
+            '5s': 5 * 1000,
             '1m': 60 * 1000,
             '5m': 5 * 60 * 1000,
+            '10m': 10 * 60 * 1000,
+            '30m': 30 * 60 * 1000,
             '1h': 60 * 60 * 1000,
             '1d': 24 * 60 * 60 * 1000,
         }[interval];
@@ -401,7 +405,14 @@ router.get("/api/market/candles/:symbol", async (req, res) => {
             }
         });
 
-        const candles = Array.from(candles_map.values());
+        const candles = Array.from(candles_map.values()).map((c) => ({
+            ...c,
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+            volume: Number(c.volume),
+        }));
 
         console.log({ candles });
 

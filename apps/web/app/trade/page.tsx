@@ -89,7 +89,7 @@ export default function TradePage({ params }: { params: { symbol?: string } }) {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 items-start gap-2.5 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-3 xl:grid-cols-[minmax(0,1fr)_320px_350px]">
+      <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-3 xl:grid-cols-[minmax(0,1fr)_320px_350px]">
         <div className="order-1">
           <Chart />
         </div>

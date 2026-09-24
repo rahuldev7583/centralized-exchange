@@ -64,7 +64,9 @@ export function TradesPanel({ variant = "panel" as const }: { variant?: "panel" 
           <span className="text-right">Time</span>
         </div>
         {trades.length === 0 ? (
-          <div className={emptyState}>No trades yet</div>
+          <div className="flex h-full items-center justify-center">
+            <span className={emptyState}>No trades yet</span>
+          </div>
         ) : (
           trades.map((t, i) => {
             const side = t.side === "sell" ? "sell" : "buy";

@@ -1,10 +1,6 @@
 /* eslint-disable no-undef */
-import { config as loadEnv } from "dotenv";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-loadEnv({ path: path.resolve(__dirname, "../../.env") });
+// Env vars (NEXT_PUBLIC_WS_URL, NEXT_PUBLIC_API_URL) are auto-loaded by Next.js
+// from this app's own .env file (./.env) — no code defaults.
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

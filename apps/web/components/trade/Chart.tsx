@@ -9,18 +9,21 @@ import {
   CrosshairMode,
   type IChartApi,
   type ISeriesApi,
+  type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 import { api } from "@/lib/api";
 import { useMarket } from "@/context/MarketContext";
 import { wsClient } from "@/lib/ws";
-import { centerLoader, cx, panel, panelTitle, spinner } from "@/lib/ui";
+import { centerLoader, cx, panel, panelTitle, spinner, tradePanelHeight } from "@/lib/ui";
 
 const INTERVALS = [
   { label: "1s", value: "1s", ms: 1_000 },
   { label: "5s", value: "5s", ms: 5_000 },
   { label: "1m", value: "1m", ms: 60_000 },
   { label: "5m", value: "5m", ms: 5 * 60_000 },
+  { label: "10m", value: "10m", ms: 10 * 60_000 },
+  { label: "30m", value: "30m", ms: 30 * 60_000 },
   { label: "1h", value: "1h", ms: 60 * 60_000 },
   { label: "1d", value: "1d", ms: 24 * 60 * 60_000 },
 ] as const;
@@ -36,6 +39,25 @@ interface Candle {
   volume: number;
 }
 
+function formatChartTime(time: unknown, includeSeconds: boolean): string {
+  let d: Date;
+  if (typeof time === "number") {
+    d = new Date(time * 1000); 
+  } else if (time && typeof time === "object") {
+    const bd = time as { year: number; month: number; day: number };
+    d = new Date(Date.UTC(bd.year, bd.month - 1, bd.day));
+  } else {
+    return String(time);
+  }
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(includeSeconds ? { second: "2-digit" } : {}),
+  });
+}
+
 export function Chart() {
   const { selected } = useMarket();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -44,6 +66,7 @@ export function Chart() {
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const [interval, setCandleInterval] = useState<Interval>("1m");
   const [loading, setLoading] = useState(false);
+  const intervalRef = useRef<Interval>("1m");
 
   const symbol = selected?.symbol;
 
@@ -71,6 +94,9 @@ export function Chart() {
         borderColor: "#22252f",
         timeVisible: true,
         secondsVisible: false,
+      },
+      localization: {
+        timeFormatter: (t: Time) => formatChartTime(t, intervalRef.current.endsWith("s")),
       },
       autoSize: true,
     });
@@ -119,6 +145,7 @@ export function Chart() {
   useEffect(() => {
     // When using sub-minute candles, show seconds on the x-axis.
     if (typeof interval !== "string") return;
+    intervalRef.current = interval;
     chartRef.current?.applyOptions({
       timeScale: {
         secondsVisible: interval.endsWith("s"),
@@ -220,7 +247,7 @@ export function Chart() {
   }, [symbol]);
 
   return (
-    <div className={panel}>
+    <div className={cx(panel, tradePanelHeight, "flex flex-col")}>
       <div className="flex items-center gap-1 border-b border-border px-3 py-[9px]">
         <span className={panelTitle}>Chart</span>
         <div className="ml-auto flex gap-1">
@@ -238,7 +265,7 @@ export function Chart() {
           ))}
         </div>
       </div>
-      <div className="relative h-[380px] w-full md:h-[660px]">
+      <div className="relative min-h-0 w-full flex-1">
         {loading && (
           <div className={cx(centerLoader, "absolute inset-0 bg-panel")}>
             <span className={spinner} />

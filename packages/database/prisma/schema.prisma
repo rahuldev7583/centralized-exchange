@@ -119,8 +119,8 @@ model Order {
     id       String  @id
     type     String
     price    Decimal @db.Decimal(78, 0)
-    quantity Int
-    filled   Int
+    quantity Decimal @db.Decimal(78, 18)
+    filled   Decimal @db.Decimal(78, 18)
     status   String
     side     String
 
@@ -143,7 +143,7 @@ model Fill {
     id       String  @id
     type     String
     price    Decimal @db.Decimal(78, 0)
-    quantity Int
+    quantity Decimal @db.Decimal(78, 18)
     symbol   String
     status   String
 
@@ -202,7 +202,7 @@ model Position {
     market_id Int
 
     side     String
-    quantity Decimal @db.Decimal(78, 0)
+    quantity Decimal @db.Decimal(78, 18)
 
     entryPrice Decimal @db.Decimal(78, 0)
 
@@ -233,7 +233,7 @@ model Liquidation {
     symbol  String
     side    String
 
-    quantity Decimal @db.Decimal(78, 0)
+    quantity Decimal @db.Decimal(78, 18)
     price    Decimal @db.Decimal(78, 0)
 
     created_at DateTime @default(now())

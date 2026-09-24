@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookIcon } from "./OBLogo";
+import { TradeXLogo } from "./TradeXLogo";
 import { cx } from "@/lib/ui";
 
 function Item({ href, label, icon }: { href: string; label: string; icon?: React.ReactNode }) {
@@ -32,9 +32,7 @@ export function Sidebar() {
   return (
     <div className="sticky top-[60px] flex h-[calc(100vh-60px)] flex-col px-3 py-3.5">
       <div className="px-2.5 pb-3.5 pt-2 text-[13px] font-semibold text-text-dim">
-        <span className="inline-flex items-center gap-[7px] tracking-wide text-text-faint">
-          <BookIcon size={15} /> OB
-        </span>
+        <TradeXLogo className="text-[17px]" />
       </div>
 
       <div className="mb-2.5">

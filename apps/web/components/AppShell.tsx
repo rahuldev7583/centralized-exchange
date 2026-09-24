@@ -3,7 +3,7 @@
 import { MarketSelector, WalletButton, ThemeToggle } from "./TopBar";
 import { Sidebar } from "./Sidebar";
 import { UserMenu } from "./UserMenu";
-import { OBLogo } from "./OBLogo";
+import { TradeXLogo } from "./TradeXLogo";
 import { useAuth } from "@/context/AuthContext";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -109,9 +109,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="sticky top-0 z-50 flex h-[60px] items-center gap-3 border-b border-border bg-bg-raised px-4 lg:gap-3.5">
-        <Link href="/trade" className="flex items-center gap-2.5 text-[19px] font-extrabold tracking-tight max-md:text-[18px]">
-          <OBLogo />
-          <span>OB</span>
+        <Link href="/trade" className="flex items-center gap-2.5">
+          <TradeXLogo className="text-[19px] max-md:text-[18px]" />
         </Link>
         <MarketSelector />
         <div className="ml-1.5 hidden min-w-0 flex-1 items-center gap-2 rounded-[11px] border border-border bg-panel px-3.5 py-2 text-text-faint transition-shadow focus-within:border-accent focus-within:shadow-[0_0_0_3px_var(--accent-bg)] md:flex md:max-w-[620px] max-[1100px]:max-w-[340px]">

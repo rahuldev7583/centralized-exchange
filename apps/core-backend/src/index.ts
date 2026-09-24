@@ -14,6 +14,39 @@ if (!process.env.REDIS_URL) {
 const app = express();
 export const BACKEND_ID = crypto.randomUUID();
 
+const CORS_ORIGINS: string[] = (
+    process.env.CORS_ORIGINS ?? "http://localhost:3000"
+)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && (CORS_ORIGINS.includes("*") || CORS_ORIGINS.includes(origin))) {
+        res.setHeader(
+            "Access-Control-Allow-Origin",
+            CORS_ORIGINS.includes("*") ? "*" : origin,
+        );
+        res.setHeader("Vary", "Origin");
+    }
+    res.setHeader(
+        "Access-Control-Allow-Methods",
+        "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    );
+    res.setHeader(
+        "Access-Control-Allow-Headers",
+        "Content-Type, Authorization, x_secret_key",
+    );
+    res.setHeader("Access-Control-Max-Age", "86400");
+
+    if (req.method === "OPTIONS") {
+        return res.sendStatus(204);
+    }
+
+    next();
+});
+
 //add bcrypt, zod schema, jwt
 //endpoint need for exchange and orderbook
 //add redis client

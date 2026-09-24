@@ -160,19 +160,19 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
 
   if (!selected) {
     return (
-      <div className={panel}>
-        <div className={emptyState}>No market selected</div>
+      <div className={cx(panel, "flex h-full flex-col")}>
+        <div className={cx(emptyState, "flex min-h-0 flex-1 items-center justify-center")}>No market selected</div>
       </div>
     );
   }
 
   if (!isAuthed) {
     return (
-      <div className={panel}>
+      <div className={cx(panel, "flex h-full flex-col")}>
         <div className={panelHeader}>
           <span className={panelTitle}>Place Order</span>
         </div>
-        <div className={emptyState}>Sign in to place orders</div>
+        <div className={cx(emptyState, "flex min-h-0 flex-1 items-center justify-center")}>Sign in to place orders</div>
       </div>
     );
   }
@@ -183,7 +183,7 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
   };
 
   return (
-    <div className={panel}>
+    <div className={cx(panel, "flex h-full flex-col")}>
       <div className={panelHeader}>
         <div className={tabs}>
           <button className={cx(tab, type === "limit" && tabActive)} onClick={() => setType("limit")}>
@@ -200,7 +200,7 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
         )}
       </div>
 
-      <div className="flex flex-col gap-3 p-3.5">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3.5">
         <div className="flex">
           <button
             className={cx(
@@ -310,7 +310,7 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
           </div>
         </div>
 
-        <div className="flex justify-between border-t border-border pb-0.5 pt-2.5 text-[13.5px] text-text-dim">
+        <div className="mt-auto flex justify-between border-t border-border pb-0.5 pt-2.5 text-[13.5px] text-text-dim">
           <span>Est. {isPerp ? "Notional" : "Total"}</span>
           <span className="font-mono text-text">
             {notional > 0 ? `${notional.toFixed(2)} ${quoteSymbol}` : "-"}
@@ -329,11 +329,6 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
                 : `Sell ${baseSymbol}`}
         </button>
 
-        {user && (
-          <div className="text-center text-[11px] text-text-faint">
-            Signed in as {user.username}
-          </div>
-        )}
       </div>
     </div>
   );
