@@ -1,17 +1,20 @@
 import express from 'express';
 import { BACKEND_ID, client, riskEngineclient, leverageClient } from '..';
 import { find_asset, find_market, get_balance } from '../middleware/exchange';
-import { prisma } from 'database';
+import { Prisma, prisma } from 'database';
 import { scaledDecimal } from 'shared-types';
 import { Order } from '../types/user';
 import { ZodError } from 'zod';
 import { createClient } from 'redis';
-import { Prisma, } from '../../generated/prisma/client';
+
+if (!process.env.REDIS_URL) {
+    throw new Error('REDIS_URL is not set');
+}
 
 const router = express();
 
 async function waitForResponse(queue: string, request_id: string, timeoutMs: number): Promise<any | null> {
-    const res_client = createClient();
+    const res_client = createClient({ url: process.env.REDIS_URL });
     res_client.on('error', () => { });
     await res_client.connect();
     const deadline = Date.now() + timeoutMs;

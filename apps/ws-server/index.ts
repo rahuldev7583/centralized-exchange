@@ -13,3 +13,7 @@ wss.on('connection', function connection(ws) {
 
     ws.send('something');
 });
+
+
+wss.on('error', console.error);
+wss.on('close', () => console.log('Disconnected'));

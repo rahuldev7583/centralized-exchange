@@ -2,6 +2,10 @@ import { createClient } from 'redis';
 import { ASSETS, FILLS, ORDERBOOK, type Fill, type OpenOrder, type Order, type Orderbook } from "shared-types";
 import { prisma } from "database";
 
+if (!process.env.REDIS_URL) {
+    throw new Error('REDIS_URL is not set');
+}
+
 export type engineStatus = | 'pending' | 'ready' | 'down';
 export type requestStatus = | 'order accepted' | 'order rejected' | 'order pending' | 'order cancelled';
 
@@ -30,32 +34,32 @@ export interface engineResponse {
     data?: any
 }
 
-const client = createClient();
+const client = createClient({ url: process.env.REDIS_URL });
 client.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const publishclient = createClient();
+const publishclient = createClient({ url: process.env.REDIS_URL });
 publishclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const dbWorkerclient = createClient();
+const dbWorkerclient = createClient({ url: process.env.REDIS_URL });
 dbWorkerclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const riskEngclient = createClient();
+const riskEngclient = createClient({ url: process.env.REDIS_URL });
 riskEngclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const riskEngPubclient = createClient();
+const riskEngPubclient = createClient({ url: process.env.REDIS_URL });
 riskEngPubclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const liquidationClient = createClient();
+const liquidationClient = createClient({ url: process.env.REDIS_URL });
 liquidationClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );

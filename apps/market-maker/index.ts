@@ -9,9 +9,9 @@ type SymbolConfig = {
 
 type OrderRef = { order_id: number; side: 'buy' | 'sell' };
 
-const API_BASE = process.env.MM_API_BASE || 'http://localhost:5000';
-const USERNAME = process.env.MM_USERNAME || 'mm_bot';
-const PASSWORD = process.env.MM_PASSWORD || 'mm_bot_password';
+const API_BASE = process.env.MM_API_BASE;
+const USERNAME = process.env.MM_USERNAME;
+const PASSWORD = process.env.MM_PASSWORD;
 const API_WAIT_MS = Number(process.env.MM_API_WAIT_MS || 60_000);
 const SHOULD_FUND = (process.env.MM_FUND || 'false').toLowerCase() === 'true';
 const FUND_BASE = Number(process.env.MM_FUND_BASE || 1000);
@@ -22,10 +22,20 @@ const STEP = Number(process.env.MM_STEP || 10); // absolute price step per level
 const QTY = Number(process.env.MM_QTY || 0.002);
 const UPDATE_MS = Number(process.env.MM_UPDATE_MS || 300); // 200-500ms
 
+if (!API_BASE || !USERNAME || !PASSWORD) {
+    throw new Error(
+        'MM_API_BASE, MM_USERNAME and MM_PASSWORD must be set in .env',
+    );
+}
 if (LEVELS <= 0) throw new Error('MM_LEVELS must be > 0');
 
 function parseSymbols(): SymbolConfig[] {
-    const raw = process.env.MM_SYMBOLS || 'BTC_USDC:btcusdc';
+    const raw = process.env.MM_SYMBOLS;
+    if (!raw) {
+        throw new Error(
+            'MM_SYMBOLS is not set. Add it to .env',
+        );
+    }
     return raw.split(',').map((pair) => {
         const [local, binance] = pair.split(':');
         const [base, quote] = local.split('_');
@@ -186,7 +196,7 @@ async function run() {
 
     // Build Binance combined stream URL
     const streams = symbols.map((s) => `${s.binance}@trade`).join('/');
-    const BINANCE_WS = `wss://stream.binance.com:9443/stream?streams=${streams}`;
+    const BINANCE_WS = `wss://data-stream.binance.vision/stream?streams=${streams}`;
     const ws = new WebSocket(BINANCE_WS);
 
     ws.on('open', () => {

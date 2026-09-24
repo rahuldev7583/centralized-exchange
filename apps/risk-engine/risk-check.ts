@@ -3,6 +3,10 @@ import { LEVERAGES, PRICES, ASSETS, BALANCES } from "./shared-state";
 import { Decimal } from "database/generated/prisma/internal/prismaNamespace";
 import { prisma } from 'database';
 
+if (!process.env.REDIS_URL) {
+    throw new Error('REDIS_URL is not set');
+}
+
 export type engineStatus = | 'pending' | 'ready' | 'down';
 
 //risk-engine-req-queue => client => for receving order request from api to risk engine 
@@ -15,37 +19,37 @@ export type engineStatus = | 'pending' | 'ready' | 'down';
 
 let risk_engine_status: engineStatus = 'down'
 
-const client = createClient();
+const client = createClient({ url: process.env.REDIS_URL });
 client.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const publishclient = createClient();
+const publishclient = createClient({ url: process.env.REDIS_URL });
 publishclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const leverageClient = createClient();
+const leverageClient = createClient({ url: process.env.REDIS_URL });
 leverageClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const leveragePubClient = createClient();
+const leveragePubClient = createClient({ url: process.env.REDIS_URL });
 leveragePubClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const priceStreamClient = createClient();
+const priceStreamClient = createClient({ url: process.env.REDIS_URL });
 priceStreamClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const matchineEngClient = createClient();
+const matchineEngClient = createClient({ url: process.env.REDIS_URL });
 matchineEngClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const riskToAPIclient = createClient();
+const riskToAPIclient = createClient({ url: process.env.REDIS_URL });
 riskToAPIclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );

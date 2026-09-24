@@ -2,23 +2,27 @@ import { createClient } from "redis";
 import { Prisma, prisma } from "database";
 import { scaledDecimal, scheduleUTC } from "shared-types";
 
-const client = createClient();
+if (!process.env.REDIS_URL) {
+    throw new Error("REDIS_URL is not set");
+}
+
+const client = createClient({ url: process.env.REDIS_URL });
 
 client.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const leverageclient = createClient();
+const leverageclient = createClient({ url: process.env.REDIS_URL });
 leverageclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const leveragePubclient = createClient();
+const leveragePubclient = createClient({ url: process.env.REDIS_URL });
 leveragePubclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const fundingClient = createClient();
+const fundingClient = createClient({ url: process.env.REDIS_URL });
 
 fundingClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),

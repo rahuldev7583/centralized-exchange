@@ -4,7 +4,11 @@ import { ASSETS, PRICES, SHARED_ORDERBOOK, BALANCES, LEVERAGES, SHARED_FILLS } f
 import { createClient } from "redis";
 import { scheduleUTC } from "shared-types";
 
-const client = createClient();
+if (!process.env.REDIS_URL) {
+    throw new Error("REDIS_URL is not set");
+}
+
+const client = createClient({ url: process.env.REDIS_URL });
 client.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );

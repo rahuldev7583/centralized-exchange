@@ -1,7 +1,11 @@
 import { createClient } from 'redis';
 import { WebSocket } from 'ws';
 
-const client = createClient();
+if (!process.env.REDIS_URL) {
+    throw new Error('REDIS_URL is not set.');
+}
+
+const client = createClient({ url: process.env.REDIS_URL });
 
 client.connect();
 console.log('Connected');
@@ -9,10 +13,10 @@ client.on('error', (err) => console.error('Redis Client Error', err));
 
 //index-prices:events => stream index prices 
 
-const BINANCE_WS_STREAM_URL = process.env.BINANCE_WS_STREAM_URL || '';
+const BINANCE_WS_STREAM_URL: string | undefined = process.env.BINANCE_WS_STREAM_URL;
 
 if (!BINANCE_WS_STREAM_URL) {
-    console.log("Invalid BINANCE_WS_STREAM_URL");
+    throw new Error("BINANCE_WS_STREAM_URL is not set");
 }
 
 const ws = new WebSocket(BINANCE_WS_STREAM_URL);

@@ -191,9 +191,34 @@ router.get('/api/exchange/markets', async (req, res) => {
         if (!existing_markets) {
             return res.status(404).json({ message: 'Market not found' });
         }
-        return res.status(201).json({
+        return res.status(200).json({
             message: 'Market fetched successfully',
             markets: existing_markets
+        });
+
+    } catch (error: any) {
+        console.log({ error });
+        const errs = error instanceof ZodError ? error.issues.map((i: any) => {
+            return { key: i.path[0], error: i.message };
+        }) : '';
+
+        return res.status(404).json({ message: 'Error occurred', data: errs || '' });
+    }
+});
+
+router.get('/api/exchange/assets', async (req, res) => {
+    try {
+        const existing_assets = await prisma.asset.findMany({});
+        if (!existing_assets) {
+            return res.status(404).json({ message: 'Asset not found' });
+        }
+        console.log({ existing_assets });
+
+        return res.status(200).json({
+            message: 'Asset fetched successfully',
+            assets: JSON.stringify(existing_assets, (key, value) =>
+                typeof value === 'bigint' ? value.toString() : value
+            )
         });
 
     } catch (error: any) {

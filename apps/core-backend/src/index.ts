@@ -7,6 +7,10 @@ import walletRouter from "./routes/wallet"
 import { createClient } from 'redis';
 import { userAuthMiddleware } from './middleware/auth';
 
+if (!process.env.REDIS_URL) {
+    throw new Error('REDIS_URL is not set');
+}
+
 const app = express();
 export const BACKEND_ID = crypto.randomUUID();
 
@@ -23,7 +27,7 @@ export const BACKEND_ID = crypto.randomUUID();
 
 
 
-export const client = createClient();
+export const client = createClient({ url: process.env.REDIS_URL });
 
 client.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
@@ -32,7 +36,7 @@ client.on('error', (err: any) =>
 client.connect();
 console.log('Connected');
 
-export const riskEngineclient = createClient();
+export const riskEngineclient = createClient({ url: process.env.REDIS_URL });
 
 riskEngineclient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
@@ -41,7 +45,7 @@ riskEngineclient.on('error', (err: any) =>
 riskEngineclient.connect();
 console.log('riskEngineclient Connected');
 
-export const leverageClient = createClient();
+export const leverageClient = createClient({ url: process.env.REDIS_URL });
 
 leverageClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
@@ -51,7 +55,7 @@ leverageClient.connect();
 console.log('leverage Connected');
 
 export async function get_identifier(queue: string, backend?: boolean) {
-    const res_client = createClient();
+    const res_client = createClient({ url: process.env.REDIS_URL });
 
     res_client.on('error', (err: any) =>
         console.log({ msg: 'Redis client error', err }),

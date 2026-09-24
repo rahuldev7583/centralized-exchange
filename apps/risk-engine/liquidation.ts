@@ -4,13 +4,20 @@ import { ASSETS, PRICES, SHARED_FILLS, SHARED_ORDERBOOK, LEVERAGES } from "./sha
 import { prisma } from "database";
 import { scheduleUTC } from "shared-types";
 
-const matchineEngClient = createClient();
+if (!process.env.REDIS_URL) {
+    throw new Error("REDIS_URL is not set");
+}
+
+const matchineEngClient = createClient({ url: process.env.REDIS_URL });
 matchineEngClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
 const liquidation_check = async () => {
-    const LIQUIDATION_USER_ID = process.env.LIQUIDATION_USER_ID || 0;
+    const LIQUIDATION_USER_ID = process.env.LIQUIDATION_USER_ID;
+    if (!LIQUIDATION_USER_ID) {
+        throw new Error("LIQUIDATION_USER_ID is not set");
+    }
     const MAINTAINANCE_RATE = 0.5;
     //i have to loop over all asset orderbook's bids and asks, calculated uPNL, then margin balnace, then if any position's margin balance is less than maintiance margin then force fully close this from market flush, isurance fund or ADL
 

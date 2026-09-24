@@ -5,6 +5,10 @@ import type { engineStatus } from "./risk-check";
 import { prisma } from "database";
 import type { Decimal } from "database/generated/prisma/internal/prismaNamespace";
 
+if (!process.env.REDIS_URL) {
+    throw new Error("REDIS_URL is not set");
+}
+
 export let LEVERAGES: any = [];
 export let BALANCES: any = [];
 export let ASSETS: any = [];
@@ -22,12 +26,12 @@ const STREAM_NAME = 'index-prices:events';
 const GROUP_NAME = 'index-prices-processors';
 const CONSUMER_NAME = `worker-${process.pid}`;
 
-const client = createClient();
+const client = createClient({ url: process.env.REDIS_URL });
 client.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
 
-const matchingClient = createClient();
+const matchingClient = createClient({ url: process.env.REDIS_URL });
 matchingClient.on('error', (err: any) =>
     console.log({ msg: 'Redis client error', err }),
 );
