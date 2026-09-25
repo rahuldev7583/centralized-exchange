@@ -1,0 +1,122 @@
+name: exchange
+
+x-service: &x-service
+  restart: unless-stopped
+  env_file:
+    - .env
+
+x-db-env: &x-db-env
+  REDIS_URL: ${REDIS_URL:?set REDIS_URL in .env}
+  DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+
+networks:
+  exchange-net:
+    driver: bridge
+
+services:
+  web:
+    <<: *x-service
+    image: exchange-web:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: web
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:5000}
+        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8080}
+    environment:
+      APP: web
+      NEXT_PUBLIC_API_URL: http://core-backend:5000
+    networks:
+      - exchange-net
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  core-backend:
+    <<: *x-service
+    image: exchange-core-backend:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: core-backend
+    environment:
+      <<: *x-db-env
+      APP: core-backend
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      MIGRATE_ON_START: "true"
+    networks:
+      - exchange-net
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:5000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  matching-engine:
+    <<: *x-service
+    image: exchange-matching-engine:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: matching-engine
+    environment:
+      <<: *x-db-env
+      APP: matching-engine
+      MIGRATE_ON_START: "false"
+    networks:
+      - exchange-net
+
+  risk-engine:
+    <<: *x-service
+    image: exchange-risk-engine:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: risk-engine
+    environment:
+      <<: *x-db-env
+      APP: risk-engine
+      MIGRATE_ON_START: "false"
+    networks:
+      - exchange-net
+
+  db-worker:
+    <<: *x-service
+    image: exchange-db-worker:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: db-worker
+    environment:
+      <<: *x-db-env
+      APP: db-worker
+      MIGRATE_ON_START: "false"
+    networks:
+      - exchange-net
+
+  oracle-service:
+    <<: *x-service
+    image: exchange-oracle-service:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: oracle-service
+    environment:
+      <<: *x-db-env
+      APP: oracle-service
+    networks:
+      - exchange-net
