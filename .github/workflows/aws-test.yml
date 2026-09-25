@@ -34,7 +34,7 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
-            EXCHANGE_PROD, exchange/production
+            EXCHANGE_PROD, dev/exchange
           parse-json-secrets: true
 
       - name: Test configuration
