@@ -19,4 +19,29 @@ jobs:
           aws-region: us-east-1
 
       - name: Check AWS identity
-        run: aws sts get-caller-identity
+        run: |
+          aws sts get-caller-identity
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Verify ECR access
+        run: |
+          aws ecr describe-repositories --region us-east-1
+
+      - name: Load production secrets
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            EXCHANGE_PROD, exchange/production
+          parse-json-secrets: true
+
+      - name: Test configuration
+        run: |
+          test -n "$DATABASE_URL"
+          test -n "$REDIS_URL"
+
+          echo "DATABASE_URL is loaded"
+          echo "REDIS_URL is loaded"
+          echo "Secrets loaded successfully"
