@@ -9,9 +9,9 @@ if (!process.env.REDIS_URL) {
     throw new Error("REDIS_URL is not set");
 }
 
-export let LEVERAGES: any = [];
-export let BALANCES: any = [];
-export let ASSETS: any = [];
+export let LEVERAGES: any[] = [];
+export let BALANCES: any[] = [];
+export let ASSETS: any[] = [];
 
 export let PRICES = new Map<string, {
     index_price: Decimal,
@@ -20,7 +20,7 @@ export let PRICES = new Map<string, {
 
 export const SHARED_ORDERBOOK = new Map<string, Orderbook>();
 export const SHARED_FILLS: Fill[] = [];
-export let SHARED_POSITIONS: any = [];
+export let SHARED_POSITIONS: any[] = [];
 
 const STREAM_NAME = 'index-prices:events';
 const GROUP_NAME = 'index-prices-processors';
@@ -50,7 +50,7 @@ const initializeStreamAndGroup = async () => {
     try {
         await client.xGroupCreate(STREAM_NAME, GROUP_NAME, '0', { MKSTREAM: true });
         console.log(`[Setup] Consumer group '${GROUP_NAME}' created.`);
-    } catch (err) {
+    } catch (err: any) {
 
         if (err.message.includes('BUSYGROUP')) {
             //console.log(`[Setup] Consumer group '${GROUP_NAME}' already exists. Proceeding...`);
@@ -70,14 +70,26 @@ const getIndexPrice = async () => {
 
     if (!response || response.length === 0) return;
 
-    const [{ messages }] = response;
+    const [{ messages }]: any = response;
     console.log({ messages });
 
     const { id, message } = messages[0];
 
-    const ast = ASSETS.find(a => a.symbol == message.symbol);
+    const symbol = String(message.symbol || '').toUpperCase();
+    const ast = ASSETS.find((a: any) => a.symbol == symbol);
 
-    const index_price = scaledDecimal(message.price, ast.decimals);
+    if (!ast) {
+        console.log({
+            msg: 'Skipping index price for unknown asset symbol',
+            symbol,
+            known_assets: ASSETS.map((a: any) => a.symbol)
+        });
+
+        await client.xAck(STREAM_NAME, GROUP_NAME, id);
+        return;
+    }
+
+    const index_price = scaledDecimal(message.price, Number(ast.decimals));
 
     const last_traded_price = ast.last_traded_price;
 
@@ -85,7 +97,7 @@ const getIndexPrice = async () => {
 
     console.log({ index_price, last_traded_price, mark_price });
 
-    PRICES.set(message.symbol, {
+    PRICES.set(symbol, {
         index_price: index_price,
         mark_price: mark_price
     })

@@ -57,7 +57,7 @@ const liquidation_check = async () => {
         const postional_value = f.quantity * mark_price;
 
         const long_leverage = LEVERAGES.find(l => l.user_id == f.buy_user_id);
-        const short_leverage = LEVERAGES.find(l => l.user_id == f.sell_user_Id);
+        const short_leverage = LEVERAGES.find(l => l.user_id == f.sell_user_id);
 
         const long_initial_marg = postional_value / long_leverage;
         const short_initial_marg = postional_value / short_leverage;

@@ -21,6 +21,20 @@ if (!BINANCE_WS_STREAM_URL) {
 
 const ws = new WebSocket(BINANCE_WS_STREAM_URL);
 
+const QUOTE_ASSETS = ['USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USD', 'BTC', 'ETH', 'BNB'];
+
+const assetSymbolFromStream = (stream: string) => {
+    const pair = stream.split('@')[0]?.toUpperCase();
+
+    if (!pair) {
+        return;
+    }
+
+    const quote = QUOTE_ASSETS.find(q => pair.endsWith(q) && pair.length > q.length);
+
+    return quote ? pair.slice(0, -quote.length) : pair;
+}
+
 const pushToRedisStream = async (data: any) => {
     try {
         const streamName = 'index-prices:events';
@@ -43,16 +57,21 @@ ws.on('message', (data) => {
     console.log(`Received: ${data.toString()}`);
     const parsed_data = JSON.parse(data.toString());
 
-    const symbol = parsed_data.stream;
+    const symbol = assetSymbolFromStream(parsed_data.stream);
 
     console.log({ symbol });
+
+    if (!symbol) {
+        console.log({ msg: 'Unable to parse asset symbol from oracle stream', stream: parsed_data.stream });
+        return;
+    }
 
     const trade = parsed_data.data;
 
     console.log({ trade });
 
     const asset = {
-        symbol: symbol.slice(0, 3).toUpperCase(),
+        symbol,
         timestamp: trade.T.toString(),
         price: trade.p.toString()
     };
