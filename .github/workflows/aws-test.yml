@@ -39,9 +39,9 @@ jobs:
 
       - name: Test configuration
         run: |
-          test -n "$DATABASE_URL"
-          test -n "$REDIS_URL"
-
+          test -n "$EXCHANGE_PROD_DATABASE_URL"
+          test -n "$EXCHANGE_PROD_REDIS_URL"
+      
           echo "DATABASE_URL is loaded"
           echo "REDIS_URL is loaded"
           echo "Secrets loaded successfully"
