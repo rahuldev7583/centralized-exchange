@@ -1,0 +1,70 @@
+name: Test ECR Docker Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  AWS_REGION: us-east-1
+
+  ECR_REGISTRY: 473123644309.dkr.ecr.us-east-1.amazonaws.com
+  ECR_REPOSITORY: exchange-core-backend
+
+jobs:
+
+  build-and-push:
+    name: Build and push core-backend
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::473123644309:role/github-actions-exchange
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Show image information
+        run: |
+          echo "Repository: $ECR_REPOSITORY"
+          echo "Registry:   $ECR_REGISTRY"
+          echo "Commit:     $GITHUB_SHA"
+          echo "Image:"
+          echo "$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+
+      - name: Build core-backend Docker image
+        run: |
+          docker build \
+            --build-arg APP=core-backend \
+            --tag "$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA" \
+            .
+
+      - name: Verify Docker image
+        run: |
+          docker image inspect \
+            "$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+
+      - name: Push core-backend image to ECR
+        run: |
+          docker push \
+            "$ECR_REGISTRY/$ECR_REPOSITORY:$GITHUB_SHA"
+
+      - name: Verify image in ECR
+        run: |
+          aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="$GITHUB_SHA" \
+            --region "$AWS_REGION"
