@@ -77,6 +77,12 @@ jobs:
           docker push \
             "${ECR_REGISTRY}/${{ matrix.repository }}:${GITHUB_SHA}"
 
+      - name: Verify web build variables
+        if: matrix.app == 'web'
+        run: |
+          echo "NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}"
+          echo "NEXT_PUBLIC_WS_URL=${{ vars.NEXT_PUBLIC_WS_URL }}"
+
   deploy:
     name: Deploy to EC2
     needs:
