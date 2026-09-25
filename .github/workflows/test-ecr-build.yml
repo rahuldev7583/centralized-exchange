@@ -68,3 +68,24 @@ jobs:
             --repository-name "$ECR_REPOSITORY" \
             --image-ids imageTag="$GITHUB_SHA" \
             --region "$AWS_REGION"
+      - name: Test SSM connection to EC2
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "i-05ac2a173a204d771" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=["whoami","hostname","docker --version","docker compose version"]' \
+            --region us-east-1 \
+            --query "Command.CommandId" \
+            --output text)
+      
+          echo "Command ID: $COMMAND_ID"
+      
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "i-05ac2a173a204d771" \
+            --region us-east-1
+      
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "i-05ac2a173a204d771" \
+            --region us-east-1
