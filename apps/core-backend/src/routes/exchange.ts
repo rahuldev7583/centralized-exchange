@@ -548,6 +548,9 @@ router.get("/api/exchange/trades/:symbol", async (req, res) => {
             where: {
                 symbol: symbol,
             },
+            orderBy: {
+                created_at: 'desc',
+            },
             take: 20
         });
         console.log({ fills });

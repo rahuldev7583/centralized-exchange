@@ -99,12 +99,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const isAuthPage = pathname.startsWith("/auth");
+  const isPublicPage = pathname === "/" || pathname === "/trade" || pathname.startsWith("/trade/");
 
   useEffect(() => {
-    if (!loading && !isAuthed && !isAuthPage) {
+    if (!loading && !isAuthed && !isAuthPage && !isPublicPage) {
       router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
     }
-  }, [loading, isAuthed, isAuthPage, pathname, router]);
+  }, [loading, isAuthed, isAuthPage, isPublicPage, pathname, router]);
 
   return (
     <div className="flex min-h-screen flex-col">

@@ -8,6 +8,7 @@ import { useBalance } from "@/context/BalanceContext";
 import { useToast } from "@/components/Toast";
 import { formatQuantity } from "@/lib/format";
 import type { OrderType, Side } from "@/lib/types";
+import { usePathname, useRouter } from "next/navigation";
 import {
   btnBuy,
   btnSell,
@@ -19,7 +20,6 @@ import {
   formLabel,
   panel,
   panelHeader,
-  panelTitle,
   tab,
   tabActive,
   tabs,
@@ -34,9 +34,11 @@ interface Props {
 
 export function OrderForm({ price, onOrderPlaced }: Props) {
   const { selected, selectedTicker } = useMarket();
-  const { isAuthed, leverage, user } = useAuth();
+  const { isAuthed, leverage } = useAuth();
   const { balances, refresh: refreshBalance } = useBalance();
   const { toast } = useToast();
+  const pathname = usePathname();
+  const router = useRouter();
 
   const isPerp = selected?.type === "Perp";
 
@@ -124,6 +126,10 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
 
   const submit = async () => {
     if (!symbol || busy) return;
+    if (!isAuthed) {
+      router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
+      return;
+    }
     const q = Number(quantity);
     if (!q || q <= 0) {
       toast("error", "Invalid quantity");
@@ -162,17 +168,6 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
     return (
       <div className={cx(panel, "flex h-full flex-col")}>
         <div className={cx(emptyState, "flex min-h-0 flex-1 items-center justify-center")}>No market selected</div>
-      </div>
-    );
-  }
-
-  if (!isAuthed) {
-    return (
-      <div className={cx(panel, "flex h-full flex-col")}>
-        <div className={panelHeader}>
-          <span className={panelTitle}>Place Order</span>
-        </div>
-        <div className={cx(emptyState, "flex min-h-0 flex-1 items-center justify-center")}>Sign in to place orders</div>
       </div>
     );
   }
@@ -320,7 +315,9 @@ export function OrderForm({ price, onOrderPlaced }: Props) {
         <button className={side === "buy" ? btnBuy : btnSell} onClick={submit} disabled={busy}>
           {busy
             ? "Placing..."
-            : isPerp
+            : !isAuthed
+              ? `Sign in to ${side === "buy" ? "Buy" : "Sell"}`
+              : isPerp
               ? side === "buy"
                 ? "Open Long"
                 : "Open Short"

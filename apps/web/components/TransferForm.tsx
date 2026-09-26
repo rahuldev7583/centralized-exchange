@@ -3,9 +3,9 @@
 import { useState, type FormEvent } from "react";
 import { api, ApiError } from "@/lib/api";
 import { useBalance } from "@/context/BalanceContext";
+import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/components/Toast";
-import { useMarket } from "@/context/MarketContext";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   btnBlock,
   btnPrimary,
@@ -19,28 +19,26 @@ import {
   spinner,
 } from "@/lib/ui";
 
+const TRANSFER_ASSETS = ["USDC", "USDT"];
+
 export function TransferForm({ mode }: { mode: "onramp" | "offramp" }) {
-  const [currency, setCurrency] = useState("USD");
+  const [currency, setCurrency] = useState("USDC");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
   const { refresh } = useBalance();
+  const { isAuthed } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
-  const { tickers } = useMarket();
-
-  const assets = Array.from(
-    new Set([
-      "USD",
-      "USDC",
-      "USDT",
-      ...tickers.map((t) => t.symbol).filter((s) => s.length <= 10),
-    ]),
-  ).slice(0, 12);
+  const pathname = usePathname();
 
   const isDeposit = mode === "onramp";
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!isAuthed) {
+      router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
+      return;
+    }
     const amt = Number(amount);
     if (!amt || amt <= 0) {
       toast("error", "Invalid amount");
@@ -78,7 +76,7 @@ export function TransferForm({ mode }: { mode: "onramp" | "offramp" }) {
             value={currency}
             onChange={(e) => setCurrency(e.target.value)}
           >
-            {assets.map((a) => (
+            {TRANSFER_ASSETS.map((a) => (
               <option key={a} value={a}>
                 {a}
               </option>
