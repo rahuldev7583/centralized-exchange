@@ -18,6 +18,7 @@ jobs:
   build:
     name: Build ${{ matrix.app }}
     runs-on: ubuntu-latest
+    environment: main-deployment
 
     strategy:
       fail-fast: false
@@ -76,6 +77,16 @@ jobs:
         run: |
           docker push \
             "${ECR_REGISTRY}/${{ matrix.repository }}:${GITHUB_SHA}"
+      
+      - name: Validate web build variables
+        if: matrix.app == 'web'
+        run: |
+          if [ -z "${{ vars.NEXT_PUBLIC_API_URL }}" ]; then
+            echo "ERROR: NEXT_PUBLIC_API_URL is not configured"
+            exit 1
+          fi
+      
+          echo "NEXT_PUBLIC_API_URL=${{ vars.NEXT_PUBLIC_API_URL }}"
 
   deploy:
     name: Deploy to EC2
@@ -83,6 +94,7 @@ jobs:
       - build
 
     runs-on: ubuntu-latest
+    environment: main-deployment
 
     steps:
       - name: Configure AWS credentials
