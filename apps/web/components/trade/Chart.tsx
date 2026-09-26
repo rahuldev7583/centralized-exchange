@@ -167,6 +167,7 @@ export function Chart() {
 
     let cancelled = false;
     let inFlight = false;
+    let hasAutoFit = false;
 
     const load = async () => {
       if (inFlight) return;
@@ -175,6 +176,8 @@ export function Chart() {
         const iv = typeof interval === "string" && INTERVALS.some((i) => i.value === interval) ? interval : "1m";
         const res = await api.candles(symbol, iv, 300);
         if (cancelled) return;
+        const timeScale = chartRef.current?.timeScale();
+        const visibleRange = hasAutoFit ? timeScale?.getVisibleRange() ?? null : null;
         const candles = (res.candles || []).map((c) => ({
           time: Math.floor(c.time / 1000) as UTCTimestamp,
           open: c.open,
@@ -193,7 +196,12 @@ export function Chart() {
 
         candleSeriesRef.current?.setData(candles);
         volumeSeriesRef.current?.setData(volumes);
-        chartRef.current?.timeScale().fitContent();
+        if (!hasAutoFit) {
+          timeScale?.fitContent();
+          hasAutoFit = true;
+        } else if (visibleRange) {
+          timeScale?.setVisibleRange(visibleRange);
+        }
       } catch (e) {
         console.error("Chart candles load failed", { symbol, intervalType: typeof interval, interval, e });
         candleSeriesRef.current?.setData([]);
