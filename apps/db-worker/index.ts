@@ -1,6 +1,6 @@
 import { createClient } from "redis";
 import { Prisma, prisma } from "database";
-import { scaledDecimal, scheduleUTC } from "shared-types";
+import { scaledDecimal } from "shared-types";
 
 if (!process.env.REDIS_URL) {
     throw new Error("REDIS_URL is not set");
@@ -31,6 +31,9 @@ fundingClient.on('error', (err: any) =>
 const STREAM_NAME = 'index-prices:events';
 const GROUP_NAME = 'index-prices-processors';
 const CONSUMER_NAME = `worker-${process.pid}`;
+const INDEX_PRICE_STREAM_INTERVAL_MS = Number(process.env.INDEX_PRICE_STREAM_INTERVAL_MS || 60_000);
+let nextIndexPriceReadAt = 0;
+let streamGroupInitialized = false;
 
 // settlement-queue => client => listen settlement and fills from matching engine
 
@@ -320,11 +323,15 @@ while (1) {
 
     console.log("All redis services connected successfully");
 
-    await initializeStreamAndGroup();
+    if (!streamGroupInitialized) {
+        await initializeStreamAndGroup();
+        streamGroupInitialized = true;
+    }
 
-    scheduleUTC(async () => {
-        await getIndexPrice()
-    }, 1 * 60 * 1000)
+    if (Date.now() >= nextIndexPriceReadAt) {
+        nextIndexPriceReadAt = Date.now() + INDEX_PRICE_STREAM_INTERVAL_MS;
+        await getIndexPrice();
+    }
 
     const settlement_req = await client.brPop('settlement-queue', 2);
 

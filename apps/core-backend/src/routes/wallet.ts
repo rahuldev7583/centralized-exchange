@@ -193,6 +193,18 @@ router.post('/api/wallet/offramp', async (req, res) => {
         //call offramp service
 
         const scaled_amount = await scaledDecimal(amount, Number(primary_ast.decimals));
+        const existing_wallet = await prisma.asset_balance.findUnique({
+            where: {
+                user_id_assetId: {
+                    user_id: user_id,
+                    assetId: primary_ast.id
+                }
+            }
+        });
+
+        if (!existing_wallet || Number(existing_wallet.balance) < Number(scaled_amount)) {
+            return res.status(400).json({ message: "Insufficient available balance" });
+        }
 
         const wallet = await prisma.asset_balance.update({
             where: {

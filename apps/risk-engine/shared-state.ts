@@ -25,6 +25,8 @@ export let SHARED_POSITIONS: any[] = [];
 const STREAM_NAME = 'index-prices:events';
 const GROUP_NAME = 'index-prices-processors';
 const CONSUMER_NAME = `worker-${process.pid}`;
+const INDEX_PRICE_STREAM_INTERVAL_MS = Number(process.env.INDEX_PRICE_STREAM_INTERVAL_MS || 60_000);
+let nextIndexPriceReadAt = 0;
 
 const client = createClient({ url: process.env.REDIS_URL });
 client.on('error', (err: any) =>
@@ -163,7 +165,8 @@ export const shared_service = async () => {
             price_stream = 'ready'
         }
 
-        if (price_stream == 'ready') {
+        if (price_stream == 'ready' && Date.now() >= nextIndexPriceReadAt) {
+            nextIndexPriceReadAt = Date.now() + INDEX_PRICE_STREAM_INTERVAL_MS;
             await getIndexPrice();
         }
 

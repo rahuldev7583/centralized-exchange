@@ -6,6 +6,7 @@ import { ZodError } from 'zod';
 import { prisma } from "database";
 //import { MarketType } from '../../generated/prisma/enums';
 import { MarketType } from 'database';
+import { readableDecimal } from 'shared-types';
 
 const router = express();
 
@@ -433,7 +434,7 @@ router.get("/api/history/balances", userAuthMiddleware, async (req, res) => {
     try {
         const user_id = req.user;
 
-        const balance_history = await prisma.balanceHistory.findMany({
+        const balance_history_raw = await prisma.balanceHistory.findMany({
             where: {
                 user_id: user_id
             },
@@ -441,6 +442,15 @@ router.get("/api/history/balances", userAuthMiddleware, async (req, res) => {
                 created_at: 'desc'
             }
         });
+
+        const assets = await prisma.asset.findMany();
+        const decimalsBySymbol = new Map(
+            assets.map((asset) => [asset.symbol, Number(asset.decimals)])
+        );
+        const balance_history = balance_history_raw.map((entry) => ({
+            ...entry,
+            amount: Number(readableDecimal(entry.amount, decimalsBySymbol.get(entry.symbol) ?? 0))
+        }));
 
         console.log({ balance_history });
 
