@@ -124,10 +124,10 @@ export const api = {
         );
     },
     depth(symbol: string) {
-        return request<DepthResponse>(`/api/exchange/depth/${symbol}`, { method: "GET" }, false);
+        return request<DepthResponse>(`/api/exchange/depth/${symbol}`, { method: "GET" });
     },
     trades(symbol: string) {
-        return request<TradesResponse>(`/api/exchange/trades/${symbol}`, { method: "GET" }, false);
+        return request<TradesResponse>(`/api/exchange/trades/${symbol}`, { method: "GET" });
     },
 
     placeSpotOrder(params: PlaceOrderParams) {

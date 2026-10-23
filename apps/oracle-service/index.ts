@@ -2,7 +2,7 @@ import { createClient } from 'redis';
 import { WebSocket } from 'ws';
 
 if (!process.env.REDIS_URL) {
-    throw new Error('REDIS_URL is not set.');
+  throw new Error('REDIS_URL is not set.');
 }
 
 const client = createClient({ url: process.env.REDIS_URL });
@@ -16,7 +16,7 @@ client.on('error', (err) => console.error('Redis Client Error', err));
 const BINANCE_WS_STREAM_URL: string | undefined = process.env.BINANCE_WS_STREAM_URL;
 
 if (!BINANCE_WS_STREAM_URL) {
-    throw new Error("BINANCE_WS_STREAM_URL is not set");
+  throw new Error("BINANCE_WS_STREAM_URL is not set");
 }
 
 const ws = new WebSocket(BINANCE_WS_STREAM_URL);
@@ -24,62 +24,62 @@ const ws = new WebSocket(BINANCE_WS_STREAM_URL);
 const QUOTE_ASSETS = ['USDT', 'USDC', 'BUSD', 'FDUSD', 'TUSD', 'USD', 'BTC', 'ETH', 'BNB'];
 
 const assetSymbolFromStream = (stream: string) => {
-    const pair = stream.split('@')[0]?.toUpperCase();
+  const pair = stream.split('@')[0]?.toUpperCase();
 
-    if (!pair) {
-        return;
-    }
+  if (!pair) {
+    return;
+  }
 
-    const quote = QUOTE_ASSETS.find(q => pair.endsWith(q) && pair.length > q.length);
+  const quote = QUOTE_ASSETS.find(q => pair.endsWith(q) && pair.length > q.length);
 
-    return quote ? pair.slice(0, -quote.length) : pair;
+  return quote ? pair.slice(0, -quote.length) : pair;
 }
 
 const pushToRedisStream = async (data: any) => {
-    try {
-        const streamName = 'index-prices:events';
-        const messageId = await client.xAdd(streamName, '*', data);
-        console.log(`[Producer] Event written successfully with ID: ${messageId}`);
+  try {
+    const streamName = 'index-prices:events';
+    const messageId = await client.xAdd(streamName, '*', data);
+    console.log(`[Producer] Event written successfully with ID: ${messageId}`);
 
-        return;
-    } catch (error) {
-        console.log({ error });
+    return;
+  } catch (error) {
+    console.log({ error });
 
-    }
+  }
 
 }
 
 ws.on('open', () => {
-    console.log('Connected to server');
+  console.log('Connected to server');
 });
 
 ws.on('message', (data) => {
-    console.log(`Received: ${data.toString()}`);
-    const parsed_data = JSON.parse(data.toString());
+  console.log(`Received: ${data.toString()}`);
+  const parsed_data = JSON.parse(data.toString());
 
-    const symbol = assetSymbolFromStream(parsed_data.stream);
+  const symbol = assetSymbolFromStream(parsed_data.stream);
 
-    console.log({ symbol });
+  console.log({ symbol });
 
-    if (!symbol) {
-        console.log({ msg: 'Unable to parse asset symbol from oracle stream', stream: parsed_data.stream });
-        return;
-    }
+  if (!symbol) {
+    console.log({ msg: 'Unable to parse asset symbol from oracle stream', stream: parsed_data.stream });
+    return;
+  }
 
-    const trade = parsed_data.data;
+  const trade = parsed_data.data;
 
-    console.log({ trade });
+  console.log({ trade });
 
-    const asset = {
-        symbol,
-        timestamp: trade.T.toString(),
-        price: trade.p.toString()
-    };
+  const asset = {
+    symbol,
+    timestamp: trade.T.toString(),
+    price: trade.p.toString()
+  };
 
-    console.log({ asset });
+  console.log({ asset });
 
-    console.log("Asset Price push to matching engine, risk engine redis stream");
-    pushToRedisStream(asset)
+  console.log("Asset Price push to matching engine, risk engine redis stream");
+  pushToRedisStream(asset)
 
 });
 

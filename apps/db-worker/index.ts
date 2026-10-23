@@ -88,7 +88,7 @@ const getIndexPrice = async () => {
             GROUP_NAME,
             CONSUMER_NAME,
             { key: STREAM_NAME, id: '>' },
-            { COUNT: 1, BLOCK: 5000 }
+            { COUNT: 1, BLOCK: 1000 }
         );
 
         //console.log({ response });
@@ -100,41 +100,55 @@ const getIndexPrice = async () => {
         for (const message of messages) {
             const { id, message: data } = message;
 
-            console.log({ message });
-            console.log(`[Consumer] Processing message ${id}:`, data);
+            try {
+                console.log({ message });
+                console.log(`[Consumer] Processing message ${id}:`, data);
 
-            const ast = await find_asset(data.symbol);
+                const ast = await find_asset(data.symbol);
 
-            console.log({ ast });
-            if (!ast) {
-                return
-            }
-
-            //const index_price = priceToBigInt18(data.price);
-            const index_price = data.price;
-            const mark_price = ((Number(index_price) + Number(ast.last_traded_price)) / 2);
-
-            console.log({ index_price, mark_price });
-
-            await prisma.assetPrice.create({
-                data: {
-                    symbol: ast?.symbol,
-                    mark_price: index_price,
-                    index_price: mark_price,
-                    assetId: ast.id,
-                    timestamp: new Date(Number(data.timestamp))
+                console.log({ ast });
+                if (!ast) {
+                    continue;
                 }
-            })
-            console.log("Index and Mark price updated");
 
-            await client.xAck(STREAM_NAME, GROUP_NAME, id);
-            console.log(`[Consumer] Acknowledged message ${id}`);
+                const index_price = data.price;
+                const mark_price = ((Number(index_price) + Number(ast.last_traded_price)) / 2);
 
+                console.log({ index_price, mark_price });
+
+                const timestamp = new Date(Number(data.timestamp));
+
+                await prisma.assetPrice.upsert({
+                    where: {
+                        assetId_timestamp: {
+                            assetId: ast.id,
+                            timestamp,
+                        },
+                    },
+                    create: {
+                        symbol: ast.symbol,
+                        index_price,
+                        mark_price,
+                        assetId: ast.id,
+                        timestamp,
+                    },
+                    update: {
+                        index_price,
+                        mark_price,
+                    },
+                });
+                console.log("Index and Mark price updated");
+            } catch (err) {
+                console.error('[Consumer message error]', err);
+            } finally {
+                await client.xAck(STREAM_NAME, GROUP_NAME, id);
+                console.log(`[Consumer] Acknowledged message ${id}`);
+            }
         }
     } catch (error) {
         console.error('[Consumer Error]', error);
 
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 500));
 
     }
 }
@@ -333,12 +347,12 @@ while (1) {
         await getIndexPrice();
     }
 
-    const settlement_req = await client.brPop('settlement-queue', 2);
+    const settlement_req = await client.brPop('settlement-queue', 0.5);
 
-    const leverage_req = await leverageclient.brPop('leverage-db-queue', 2);
+    const leverage_req = await leverageclient.brPop('leverage-db-queue', 0.5);
     console.log({ leverage_req });
 
-    const funding_req = await fundingClient.brPop('funding-to-db-queue', 2);
+    const funding_req = await fundingClient.brPop('funding-to-db-queue', 0.5);
     console.log({ funding_req });
 
     if (!settlement_req && !leverage_req && !funding_req) {

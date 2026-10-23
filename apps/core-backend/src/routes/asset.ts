@@ -34,8 +34,7 @@ router.post('/api/exchange/asset/add', adminAuthMiddleware, async (req, res) => 
         ]
       },
     });
-    ◍ ansible - language - server
-    ◍ ansible - lint
+
 
     if (existing_asset) {
       return res.status(404).json({ message: 'Asset already exists' });
