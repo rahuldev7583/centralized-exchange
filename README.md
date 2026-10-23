@@ -1,159 +1,379 @@
-# Turborepo starter
+# Centralized Exchange
 
-This Turborepo starter is maintained by the Turborepo core team.
+A Bun/Turborepo monorepo for a centralized crypto exchange simulation. The project includes a Next.js trading UI, an Express API, an in-memory matching engine, risk and liquidation services, an oracle price ingester, and a Prisma/PostgreSQL persistence layer coordinated through Redis queues and streams.
 
-## Using this example
+The application supports user/admin authentication, asset and market management, wallet funding/withdrawal flows, spot orders, perpetual futures orders, leverage settings, fills, order history, positions, funding history, liquidation history, market depth, tickers, and OHLCV candles.
 
-Run the following command:
+## Contents
 
-```sh
-npx create-turbo@latest
+- [Architecture](#architecture)
+- [Applications](#applications)
+- [Packages](#packages)
+- [Prerequisites](#prerequisites)
+- [Environment Variables](#environment-variables)
+- [Local Development](#local-development)
+- [Database](#database)
+- [Docker](#docker)
+- [API Reference](#api-reference)
+- [Redis Queues and Streams](#redis-queues-and-streams)
+- [Common Commands](#common-commands)
+- [Troubleshooting](#troubleshooting)
+
+## Architecture
+
+```text
+apps/web
+  |
+  | HTTP
+  v
+apps/core-backend  <-------------------------------+
+  |                                                |
+  | Redis list requests                            | Redis list responses
+  v                                                |
+apps/matching-engine ---- settlement-queue ----> apps/db-worker
+  |                         ^                     |
+  | matching-to-risk        | funding-to-db       |
+  v                         |                     v
+apps/risk-engine -----------+---------------> PostgreSQL
+  ^
+  | Redis stream: index-prices:events
+  |
+apps/oracle-service <---- Binance websocket
 ```
 
-## What's inside?
+Core responsibilities:
 
-This Turborepo includes the following packages/apps:
+- `web` renders the trading, portfolio, history, onramp, offramp, login, and signup pages.
+- `core-backend` exposes the HTTP API, validates/authenticates requests, locks balances, and forwards order commands through Redis.
+- `matching-engine` keeps the active order book in memory, matches spot/perp orders, emits fills, and responds to API requests.
+- `risk-engine` handles leverage, perp order risk checks, shared mark/index price state, liquidation checks, and funding fee jobs.
+- `db-worker` persists fills, settlements, leverage updates, funding fees, and index/mark prices.
+- `oracle-service` consumes Binance trade streams and writes index price events into Redis.
+- `database` owns the Prisma schema, migrations, generated client, and shared Prisma export.
 
-### Apps and Packages
+## Applications
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+| Path                   | Purpose                                                         | Main command                             |
+| ---------------------- | --------------------------------------------------------------- | ---------------------------------------- |
+| `apps/web`             | Next.js user interface on port `3000`.                          | `bun --filter web dev`                   |
+| `apps/docs`            | Next.js docs app on port `3001`.                                | `bun --filter docs dev`                  |
+| `apps/core-backend`    | Express API on port `5000`.                                     | `bun --filter core-backend dev`          |
+| `apps/matching-engine` | In-memory order book and matcher.                               | `bun --filter matching-engine dev`       |
+| `apps/risk-engine`     | Risk checks, liquidation, funding, shared price state.          | `cd apps/risk-engine && bun run main.ts` |
+| `apps/db-worker`       | Redis worker that writes exchange events to Postgres.           | `bun --filter db-worker dev`             |
+| `apps/oracle-service`  | Binance websocket price ingester.                               | `bun --filter oracle-service dev`        |
+| `apps/ws-server`       | Minimal websocket server on port `8080`.                        | `bun --filter ws-server dev`             |
+| `apps/market-maker`    | Market making bot driven by configured symbols and credentials. | `bun --filter market-maker dev`          |
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+## Packages
 
-### Utilities
+| Path                         | Purpose                                                                          |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| `packages/database`          | Prisma schema, migrations, generated client, and Prisma exports.                 |
+| `packages/shared-types`      | Shared exchange types, in-memory maps, decimal helpers, and scheduler utilities. |
+| `packages/ui`                | Shared React UI components.                                                      |
+| `packages/eslint-config`     | Shared ESLint configurations.                                                    |
+| `packages/typescript-config` | Shared TypeScript configurations.                                                |
 
-This Turborepo has some additional tools already setup for you:
+## Prerequisites
 
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
+- Bun `1.3.13`
+- Node.js `>=18`
+- PostgreSQL
+- Redis
+- Docker and Docker Compose, if running containerized services
 
-### Build
+This repository does not define local PostgreSQL or Redis services in `docker-compose.yml`; both must be reachable through `DATABASE_URL` and `REDIS_URL`.
 
-To build all apps and packages, run the following command:
+## Environment Variables
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+Create a local `.env` file from the example:
 
-```sh
-cd my-turborepo
-turbo build
+```bash
+cp .env.example .env
 ```
 
-Without global `turbo`, use your package manager:
+Important variables:
 
-```sh
-cd my-turborepo
-npx turbo build
-bun dlx turbo build
-bun exec turbo build
+| Variable                  | Required by                   | Description                                                     |
+| ------------------------- | ----------------------------- | --------------------------------------------------------------- |
+| `REDIS_URL`               | API, engines, workers, oracle | Redis connection string.                                        |
+| `DATABASE_URL`            | API, workers, engines, Prisma | PostgreSQL connection string.                                   |
+| `SECRET_KEY`              | `core-backend`                | JWT signing secret for users/admins.                            |
+| `ADMIN_SECRET_KEY`        | `core-backend`                | Header secret required for admin signup.                        |
+| `CORS_ORIGINS`            | `core-backend`                | Comma-separated allowed browser origins.                        |
+| `BINANCE_WS_STREAM_URL`   | `oracle-service`              | Binance combined stream URL.                                    |
+| `NEXT_PUBLIC_API_URL`     | `web`                         | Browser-visible API base URL.                                   |
+| `NEXT_PUBLIC_WS_URL`      | `web`                         | Browser-visible websocket URL.                                  |
+| `LIQUIDATION_USER_ID`     | `risk-engine`                 | User ID used by liquidation workflows.                          |
+| `MM_*`                    | `market-maker`                | Market maker credentials, symbols, sizing, spreads, and timing. |
+| `ECR_REGISTRY`, `VERSION` | Production compose            | Image registry and tag for `docker-compose.prod.yml`.           |
+
+Use strong secrets outside development. Do not commit real `.env` values.
+
+## Local Development
+
+Install dependencies from the repository root:
+
+```bash
+bun install
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+Generate the Prisma client:
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo build --filter=docs
+```bash
+bun --filter database db:generate
 ```
 
-Without global `turbo`:
+Apply migrations:
 
-```sh
-npx turbo build --filter=docs
-bun exec turbo build --filter=docs
-bun exec turbo build --filter=docs
+```bash
+bun --filter database db:migrate
 ```
 
-### Develop
+Start all Turborepo `dev` tasks:
 
-To develop all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo dev
+```bash
+bun run dev
 ```
 
-Without global `turbo`, use your package manager:
+For day-to-day exchange development, it is often easier to run the core services in separate terminals:
 
-```sh
-cd my-turborepo
-npx turbo dev
-bun exec turbo dev
-bun exec turbo dev
+```bash
+bun --filter core-backend dev
+bun --filter matching-engine dev
+bun --filter db-worker dev
+cd apps/risk-engine && bun run main.ts
+bun --filter oracle-service dev
+bun --filter web dev
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+Open:
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+- Web app: `http://localhost:3000`
+- Docs app: `http://localhost:3001`
+- API health check: `http://localhost:5000/api/health`
 
-```sh
-turbo dev --filter=web
+## Database
+
+The Prisma schema lives at `packages/database/prisma/schema.prisma`.
+
+Main models:
+
+- `User` and `Admin`
+- `Asset` and `Market`
+- `Asset_balance`
+- `Order` and `Fill`
+- `Position`
+- `leverage`
+- `AssetPrice`
+- `FundingFee`
+- `Liquidation`
+- `BalanceHistory`
+
+Database commands:
+
+```bash
+bun --filter database db:generate
+bun --filter database db:migrate
+bun --filter database db:deploy
+bun --filter database db:seed
+bun --filter database db:studio
 ```
 
-Without global `turbo`:
+The current seed script only verifies connectivity and prints `Seed complete.`
 
-```sh
-npx turbo dev --filter=web
-bun exec turbo dev --filter=web
-bun exec turbo dev --filter=web
+## Docker
+
+Build and run local images:
+
+```bash
+docker compose up --build
 ```
 
-### Remote Caching
+The local compose file starts:
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+- `web` on `3000`
+- `core-backend` on `5000`
+- `matching-engine`
+- `risk-engine`
+- `db-worker`
+- `oracle-service`
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
+The production compose file expects prebuilt images:
 
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
+```bash
+ECR_REGISTRY=<registry> VERSION=<tag> docker compose -f docker-compose.prod.yml up
 ```
 
-Without global `turbo`, use your package manager:
+The image entrypoint uses the `APP` environment variable to start the correct service. For `core-backend`, migrations run on startup by default when `MIGRATE_ON_START=true`.
 
-```sh
-cd my-turborepo
-npx turbo login
-bun exec turbo login
-bun exec turbo login
+## API Reference
+
+Base URL in development:
+
+```text
+http://localhost:5000
 ```
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+Authenticated user routes expect:
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
+```text
+Authorization: Bearer <token>
 ```
 
-Without global `turbo`:
+Admin creation expects:
 
-```sh
-npx turbo link
-bun exec turbo link
-bun exec turbo link
+```text
+x_secret_key: <ADMIN_SECRET_KEY>
 ```
 
-## Useful Links
+### Health
 
-Learn more about the power of Turborepo:
+| Method | Route         | Description       |
+| ------ | ------------- | ----------------- |
+| `GET`  | `/api/health` | API health check. |
 
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+### Authentication
+
+| Method | Route                    | Description                                    |
+| ------ | ------------------------ | ---------------------------------------------- |
+| `POST` | `/api/auth/signup`       | Create a user and return a JWT.                |
+| `POST` | `/api/auth/signin`       | Sign in a user and return a JWT.               |
+| `POST` | `/api/auth/admin/signup` | Create an admin with `x_secret_key`.           |
+| `POST` | `/api/auth/admin/signin` | Sign in an admin and return a JWT.             |
+| `GET`  | `/api/me`                | Return the authenticated user ID and leverage. |
+
+Example user signup:
+
+```bash
+curl -X POST http://localhost:5000/api/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password123"}'
+```
+
+### Assets and Markets
+
+| Method | Route                          | Description                 |
+| ------ | ------------------------------ | --------------------------- |
+| `POST` | `/api/exchange/asset/add`      | Admin-only asset creation.  |
+| `PUT`  | `/api/exchange/asset/edit/:id` | Admin-only asset update.    |
+| `POST` | `/api/exchange/market/add`     | Admin-only market creation. |
+| `GET`  | `/api/exchange/assets`         | List assets.                |
+| `GET`  | `/api/exchange/markets`        | List markets.               |
+| `GET`  | `/api/tickers/:symbol`         | Ticker for one symbol.      |
+| `GET`  | `/api/get/tickers`             | Tickers for all assets.     |
+| `GET`  | `/api/market/candles/:symbol`  | OHLCV candles from fills.   |
+
+Market candle query parameters:
+
+- `interval`: `1s`, `5s`, `1m`, `5m`, `10m`, `30m`, `1h`, or `1d`
+- `limit`: number of buckets, default `100`
+- `from`: timestamp in milliseconds
+- `to`: timestamp in milliseconds
+
+### Wallet
+
+| Method | Route                   | Description                                                       |
+| ------ | ----------------------- | ----------------------------------------------------------------- |
+| `POST` | `/api/wallet/onramp`    | Deposit a supported currency into the authenticated user wallet.  |
+| `POST` | `/api/wallet/offramp`   | Withdraw a supported currency from the authenticated user wallet. |
+| `GET`  | `/api/wallet/balance`   | List available and locked balances for all assets.                |
+| `GET`  | `/api/history/balances` | Deposit, withdrawal, and balance history.                         |
+
+Example onramp:
+
+```bash
+curl -X POST http://localhost:5000/api/wallet/onramp \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"currency":"USDC","amount":10000}'
+```
+
+### Exchange
+
+| Method   | Route                                | Description                                   |
+| -------- | ------------------------------------ | --------------------------------------------- |
+| `POST`   | `/api/exchange/spot/order`           | Create a spot limit or market order.          |
+| `POST`   | `/api/exchange/future/order`         | Create or close a perpetual futures order.    |
+| `GET`    | `/api/exchange/spot/order/:order_id` | Fetch an order from the matching engine.      |
+| `DELETE` | `/api/exchange/spot/order/:order_id` | Cancel a spot order.                          |
+| `GET`    | `/api/exchange/depth/:symbol`        | Fetch aggregated order book depth.            |
+| `POST`   | `/api/exchange/leverage`             | Update user leverage.                         |
+| `GET`    | `/api/exchange/trades/:symbol`       | Fetch recent fills for a symbol.              |
+| `GET`    | `/api/exchange/orders`               | Fetch authenticated user orders.              |
+| `GET`    | `/api/exchange/orders/:status`       | Fetch orders filtered by status.              |
+| `GET`    | `/api/exchange/fills`                | Fetch authenticated user fills.               |
+| `GET`    | `/api/exchange/positions`            | Fetch authenticated user perp positions.      |
+| `GET`    | `/api/history/funding`               | Fetch authenticated user funding fee history. |
+| `GET`    | `/api/history/liquidation`           | Fetch authenticated user liquidation history. |
+
+Example spot limit order:
+
+```bash
+curl -X POST http://localhost:5000/api/exchange/spot/order \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"limit","side":"buy","quantity":0.01,"price":65000,"symbol":"BTC_USDC"}'
+```
+
+Example market order:
+
+```bash
+curl -X POST http://localhost:5000/api/exchange/spot/order \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"market","side":"sell","quantity":0.01,"symbol":"BTC_USDC"}'
+```
+
+## Redis Queues and Streams
+
+Redis is the message bus between API, matching, risk, oracle, and persistence services.
+
+| Name                               | Type   | Producer          | Consumer                   | Purpose                                            |
+| ---------------------------------- | ------ | ----------------- | -------------------------- | -------------------------------------------------- |
+| `incoming-request`                 | List   | `core-backend`    | `matching-engine`          | Spot order, cancel, get-order, and depth commands. |
+| `response-queue-<backend_id>`      | List   | `matching-engine` | `core-backend`             | Correlated matching responses.                     |
+| `risk-engine-req-queue`            | List   | `core-backend`    | `risk-engine`              | Perp order and close-position requests.            |
+| `response-queue-perp-<backend_id>` | List   | `risk-engine`     | `core-backend`             | Risk/perp responses.                               |
+| `risk-to-matching-eng`             | List   | `risk-engine`     | `matching-engine`          | Risk-approved perp orders.                         |
+| `matching-to-risk-pub-queue`       | List   | `matching-engine` | `risk-engine`              | Matched fill events for risk state.                |
+| `settlement-queue`                 | List   | `matching-engine` | `db-worker`                | Fill and settlement persistence.                   |
+| `leverage-req-queue`               | List   | `core-backend`    | `risk-engine`              | Leverage update requests.                          |
+| `leverage-db-queue`                | List   | `risk-engine`     | `db-worker`                | Persist leverage updates.                          |
+| `leverage-res-queue`               | List   | `db-worker`       | `core-backend`             | Leverage update confirmations.                     |
+| `funding-to-db-queue`              | List   | `risk-engine`     | `db-worker`                | Funding fee settlement.                            |
+| `liquidation-to-matching-eng`      | List   | `risk-engine`     | `matching-engine`          | Liquidation orders.                                |
+| `index-prices:events`              | Stream | `oracle-service`  | `db-worker`, `risk-engine` | External index price events.                       |
+
+## Common Commands
+
+```bash
+# Install dependencies
+bun install
+
+# Start every package/app with a dev script
+bun run dev
+
+# Build all buildable apps/packages
+bun run build
+
+# Run lint tasks
+bun run lint
+
+# Run TypeScript checks
+bun run check-types
+
+# Format TypeScript, TSX, and Markdown
+bun run format
+```
+
+## Troubleshooting
+
+- If the API throws `REDIS_URL is not set`, confirm `.env` exists and the service is started from a context that loads it.
+- If Prisma commands fail, confirm `DATABASE_URL` points to a reachable PostgreSQL database and run `bun --filter database db:generate`.
+- If orders time out, make sure `matching-engine` is running and can reach the same Redis instance as `core-backend`.
+- If perp orders do not complete, run both `risk-engine` and `matching-engine`.
+- If balances do not update after fills, run `db-worker`.
+- If mark/index prices are empty, run `oracle-service` and verify `BINANCE_WS_STREAM_URL`.
+- If the web app cannot call the API, verify `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS`.
