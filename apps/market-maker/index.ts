@@ -8,6 +8,14 @@ type SymbolConfig = {
 };
 
 type OrderRef = { order_id: number; side: 'buy' | 'sell' };
+type DepthResponse = {
+    data?: {
+        bids?: [number, number][];
+        asks?: [number, number][];
+    };
+    bids?: [number, number][];
+    asks?: [number, number][];
+};
 
 const API_BASE = process.env.MM_API_BASE;
 const USERNAME = process.env.MM_USERNAME;
@@ -16,17 +24,21 @@ const API_WAIT_MS = Number(process.env.MM_API_WAIT_MS || 60_000);
 const SHOULD_FUND = (process.env.MM_FUND || 'false').toLowerCase() === 'true';
 const FUND_BASE = Number(process.env.MM_FUND_BASE || 1000);
 const FUND_QUOTE = Number(process.env.MM_FUND_QUOTE || 10000000);
-const LEVELS = Number(process.env.MM_LEVELS || 50);
-const MIN_SPREAD_BPS = Number(process.env.MM_MIN_SPREAD_BPS || 20); // 20 bps => 0.2%
-const STEP = Number(process.env.MM_STEP || 10); // absolute price step per level
+const LEVELS = Number(process.env.MM_LEVELS || 24);
+const MIN_SPREAD_BPS = Number(process.env.MM_MIN_SPREAD_BPS || 8); // 8 bps => 0.08%
+const STEP = process.env.MM_STEP ? Number(process.env.MM_STEP) : undefined; // absolute price step per level
+const STEP_BPS = Number(process.env.MM_STEP_BPS || 4);
 const QTY = Number(process.env.MM_QTY || 0.002);
-const UPDATE_MS = Number(process.env.MM_UPDATE_MS || 300); // 200-500ms
-const ORDER_GAP_MS = Number(process.env.MM_ORDER_GAP_MS || 2000);
-const TAKER_USERNAME = process.env.MM_TAKER_USERNAME;
-const TAKER_PASSWORD = process.env.MM_TAKER_PASSWORD;
-const TAKER_QTY = Number(process.env.MM_TAKER_QTY || QTY);
-
-const TAKER_INTERVAL_MS = Number(process.env.MM_TAKER_INTERVAL_MS || 20_000);
+const UPDATE_MS = Number(process.env.MM_UPDATE_MS || 1_000);
+const ORDER_GAP_MS = Number(process.env.MM_ORDER_GAP_MS || 25);
+const PRICE_DECIMALS = Number(process.env.MM_PRICE_DECIMALS || 2);
+const REFRESH_PRICE_MOVE_BPS = Number(process.env.MM_REFRESH_PRICE_MOVE_BPS || 12);
+const FORCE_REFRESH_MS = Number(process.env.MM_FORCE_REFRESH_MS || 20_000);
+const TAKER_ENABLED = (process.env.MM_TAKER_ENABLED || 'true').toLowerCase() !== 'false';
+const TAKER_USERNAME = process.env.MM_TAKER_USERNAME || 'mm_taker';
+const TAKER_PASSWORD = process.env.MM_TAKER_PASSWORD || 'marketmaker';
+const TAKER_QTY = Number(process.env.MM_TAKER_QTY || QTY * 0.55);
+const TAKER_INTERVAL_MS = Number(process.env.MM_TAKER_INTERVAL_MS || 2_500);
 
 if (!API_BASE || !USERNAME || !PASSWORD) {
     throw new Error(
@@ -34,6 +46,8 @@ if (!API_BASE || !USERNAME || !PASSWORD) {
     );
 }
 if (LEVELS <= 0) throw new Error('MM_LEVELS must be > 0');
+if (QTY <= 0) throw new Error('MM_QTY must be > 0');
+if (TAKER_QTY <= 0) throw new Error('MM_TAKER_QTY must be > 0');
 
 function parseSymbols(): SymbolConfig[] {
     const raw = process.env.MM_SYMBOLS;
@@ -54,6 +68,18 @@ function parseSymbols(): SymbolConfig[] {
 
 function sleep(ms: number) {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function randomBetween(min: number, max: number) {
+    return min + Math.random() * (max - min);
+}
+
+function roundPrice(price: number) {
+    return Number(Math.max(price, 10 ** -PRICE_DECIMALS).toFixed(PRICE_DECIMALS));
+}
+
+function roundQuantity(quantity: number) {
+    return Number(Math.max(quantity, 0.0000001).toFixed(8));
 }
 
 async function waitForApi() {
@@ -157,6 +183,8 @@ async function placeOrder(
 ): Promise<number | null> {
     const headers = { 'content-type': 'application/json', authorization: `Bearer ${token}` };
     try {
+        console.log("place order");
+
         const res = await http<EngineOrderResponse>(`/api/exchange/spot/order`, {
             method: 'POST',
             headers,
@@ -176,6 +204,20 @@ async function cancelOrder(token: string, orderId: number) {
         await http(`/api/exchange/spot/order/${orderId}`, { method: 'DELETE', headers });
     } catch (e) {
         console.error('cancelOrder error', { orderId, e });
+    }
+}
+
+async function getDepth(token: string, symbol: string) {
+    const headers = { authorization: `Bearer ${token}` };
+    try {
+        const res = await http<DepthResponse>(`/api/exchange/depth/${symbol}`, { headers });
+        return {
+            bids: res.data?.bids ?? res.bids ?? [],
+            asks: res.data?.asks ?? res.asks ?? [],
+        };
+    } catch (e) {
+        console.error('getDepth error', { symbol, e });
+        return { bids: [], asks: [] };
     }
 }
 
@@ -207,6 +249,9 @@ class MarketState {
     price: number | null = null; // last global price
     grid: OrderRef[] = []; // currently live order ids
     placing = false;
+    ready = false;
+    lastAnchor: number | null = null;
+    lastRefreshAt = 0;
     constructor(cfg: SymbolConfig) { this.cfg = cfg; }
 }
 
@@ -219,7 +264,7 @@ async function run() {
     if (SHOULD_FUND) {
         await fundBalances(token, symbols);
     }
-    const takerToken = TAKER_USERNAME && TAKER_PASSWORD
+    const takerToken = TAKER_ENABLED && TAKER_USERNAME && TAKER_PASSWORD
         ? await signInOrUp(TAKER_USERNAME, TAKER_PASSWORD)
         : undefined;
     if (takerToken) {
@@ -229,7 +274,7 @@ async function run() {
         }
     } else {
         console.log(
-            'MarketMaker running without a taker account (set MM_TAKER_USERNAME/MM_TAKER_PASSWORD) — ' +
+            'MarketMaker running without a taker account (set MM_TAKER_ENABLED=true and MM_TAKER_USERNAME/MM_TAKER_PASSWORD) — ' +
             'quotes will rest on the book but no trades will execute.',
         );
     }
@@ -267,44 +312,80 @@ async function run() {
     ws.on('close', () => console.error('WS closed'));
 
     const halfSpread = (p: number) => (p * MIN_SPREAD_BPS) / 10000; // bps to fraction
+    const levelStep = (p: number) => STEP ?? Math.max((p * STEP_BPS) / 10000, 10 ** -PRICE_DECIMALS);
+    const movedEnough = (anchor: number | null, price: number) => {
+        if (!anchor) return true;
+        return Math.abs(price - anchor) / anchor * 10_000 >= REFRESH_PRICE_MOVE_BPS;
+    };
 
-    let hasQuoted = false;
+    const isTwoSided = (orders: OrderRef[]) => {
+        return orders.some((o) => o.side === 'buy') && orders.some((o) => o.side === 'sell');
+    };
 
     async function refreshSymbol(st: MarketState) {
         if (st.placing) return;
         const p = st.price;
         if (!p || !Number.isFinite(p) || p <= 0) return;
+        if (
+            st.grid.length &&
+            !movedEnough(st.lastAnchor, p) &&
+            Date.now() - st.lastRefreshAt < FORCE_REFRESH_MS
+        ) {
+            return;
+        }
 
         st.placing = true;
         try {
-            // Cancel existing grid first
-            if (st.grid.length) {
-                await Promise.all(st.grid.map((o) => cancelOrder(token, o.order_id)));
-                st.grid = [];
-            }
+            st.ready = false;
+            const previousGrid = st.grid;
+            const nextGrid: OrderRef[] = [];
 
             const base = p;
             const minHalf = halfSpread(base);
-            const startBid = base - Math.max(minHalf, STEP);
-            const startAsk = base + Math.max(minHalf, STEP);
+            const step = levelStep(base);
+            const startBid = base - Math.max(minHalf, step);
+            const startAsk = base + Math.max(minHalf, step);
 
-            const ladder: Array<{ side: 'buy' | 'sell'; price: number }> = [];
+            const ladder: Array<{ side: 'buy' | 'sell'; price: number; quantity: number }> = [];
             for (let i = 0; i < LEVELS; i++) {
-                ladder.push({ side: 'buy', price: Math.max(0.0001, startBid - i * STEP) });
-            }
-            for (let i = 0; i < LEVELS; i++) {
-                ladder.push({ side: 'sell', price: startAsk + i * STEP });
+                const bidLevelSize = QTY * randomBetween(0.8, 1.25) * (1 + i * 0.035);
+                const askLevelSize = QTY * randomBetween(0.8, 1.25) * (1 + i * 0.035);
+                ladder.push({
+                    side: 'buy',
+                    price: roundPrice(startBid - i * step),
+                    quantity: roundQuantity(bidLevelSize),
+                });
+                ladder.push({
+                    side: 'sell',
+                    price: roundPrice(startAsk + i * step),
+                    quantity: roundQuantity(askLevelSize),
+                });
             }
 
             for (let j = 0; j < ladder.length; j++) {
-                const { side, price } = ladder[j];
-                const id = await placeOrder(token, st.cfg.symbol, side, Number(price.toFixed(2)), QTY);
+                const { side, price, quantity } = ladder[j];
+                const id = await placeOrder(token, st.cfg.symbol, side, price, quantity);
                 if (id) {
-                    st.grid.push({ order_id: id, side });
-                    hasQuoted = true;
+                    nextGrid.push({ order_id: id, side });
                 }
                 if (j < ladder.length - 1) await sleep(ORDER_GAP_MS);
             }
+            if (isTwoSided(nextGrid)) {
+                st.grid = nextGrid;
+                st.ready = true;
+                if (previousGrid.length) {
+                    await Promise.all(previousGrid.map((o) => cancelOrder(token, o.order_id)));
+                }
+            } else {
+                await Promise.all(nextGrid.map((o) => cancelOrder(token, o.order_id)));
+                st.grid = previousGrid;
+                st.ready = isTwoSided(previousGrid);
+            }
+            st.lastAnchor = base;
+            st.lastRefreshAt = Date.now();
+            console.log(
+                `MarketMaker refreshed ${st.cfg.symbol}: ${st.grid.length} live orders around ${roundPrice(base)}`,
+            );
         } catch (e) {
             console.error('refreshSymbol error', { symbol: st.cfg.symbol, e });
         } finally {
@@ -313,12 +394,24 @@ async function run() {
     }
 
     if (takerToken) {
+        let taking = false;
         setInterval(() => {
-            if (!hasQuoted) return;
+            if (taking) return;
             void (async () => {
-                for (const st of states.values()) {
-                    await placeMarketOrder(takerToken, st.cfg.symbol, 'buy', TAKER_QTY);
-                    await placeMarketOrder(takerToken, st.cfg.symbol, 'sell', TAKER_QTY);
+                taking = true;
+                try {
+                    for (const st of states.values()) {
+                        if (!st.ready || st.placing) continue;
+                        const depth = await getDepth(takerToken, st.cfg.symbol);
+                        if (!depth.bids.length || !depth.asks.length) continue;
+                        const buyQty = roundQuantity(TAKER_QTY * randomBetween(0.55, 1.25));
+                        const sellQty = roundQuantity(TAKER_QTY * randomBetween(0.55, 1.25));
+                        await placeMarketOrder(takerToken, st.cfg.symbol, 'buy', buyQty);
+                        await sleep(150);
+                        await placeMarketOrder(takerToken, st.cfg.symbol, 'sell', sellQty);
+                    }
+                } finally {
+                    taking = false;
                 }
             })();
         }, TAKER_INTERVAL_MS);
