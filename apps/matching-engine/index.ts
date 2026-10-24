@@ -1,1729 +1,263 @@
 import { createClient } from 'redis';
-import { ASSETS, FILLS, ORDERBOOK, type Fill, type OpenOrder, type Order, type Orderbook } from "shared-types";
-import { prisma } from "database";
+import { prisma } from 'database';
+import {
+  MatchingEngine,
+  type Asset,
+  type EngineResponse,
+  type EngineResult,
+  type EngineStatus,
+  type OrderInput,
+  type RequestStatus,
+} from './engine';
 
 if (!process.env.REDIS_URL) {
-    throw new Error('REDIS_URL is not set');
+  throw new Error('REDIS_URL is not set');
 }
 
-export type engineStatus = | 'pending' | 'ready' | 'down';
-export type requestStatus = | 'order accepted' | 'order rejected' | 'order pending' | 'order cancelled';
+export type engineStatus = EngineStatus;
+export type requestStatus = RequestStatus;
+export type engineResponse = EngineResponse;
 
 export type engineCommand =
-    | 'create_order'
-    | 'cancel_order'
-    | 'get-order'
-    | 'get-balance'
-    | 'get-depth'
-    | 'create-asset';
+  | 'create_order'
+  | 'cancel_order'
+  | 'get-order'
+  | 'get-balance'
+  | 'get-depth'
+  | 'create-asset';
 
 export interface engineRequest {
-    backend_id: string;
-    request_id: string;
-    payload: any;
-    command: engineCommand;
-}
-
-export interface engineResponse {
-    request_id: string;
-    order_id: string
-    status: requestStatus;
-    message: string,
-    price: number,
-    filled_quantity: number,
-    data?: any
+  backend_id: string;
+  request_id: string;
+  payload: any;
+  command: engineCommand;
 }
 
 const client = createClient({ url: process.env.REDIS_URL });
 client.on('error', (err: any) =>
-    console.log({ msg: 'Redis client error', err }),
+  console.log({ msg: 'Redis client error', err }),
 );
 
 const publishclient = createClient({ url: process.env.REDIS_URL });
 publishclient.on('error', (err: any) =>
-    console.log({ msg: 'Redis client error', err }),
+  console.log({ msg: 'Redis client error', err }),
 );
 
 const dbWorkerclient = createClient({ url: process.env.REDIS_URL });
 dbWorkerclient.on('error', (err: any) =>
-    console.log({ msg: 'Redis client error', err }),
+  console.log({ msg: 'Redis client error', err }),
 );
 
 const riskEngclient = createClient({ url: process.env.REDIS_URL });
 riskEngclient.on('error', (err: any) =>
-    console.log({ msg: 'Redis client error', err }),
+  console.log({ msg: 'Redis client error', err }),
 );
 
 const riskEngPubclient = createClient({ url: process.env.REDIS_URL });
 riskEngPubclient.on('error', (err: any) =>
-    console.log({ msg: 'Redis client error', err }),
+  console.log({ msg: 'Redis client error', err }),
 );
 
 const liquidationClient = createClient({ url: process.env.REDIS_URL });
 liquidationClient.on('error', (err: any) =>
-    console.log({ msg: 'Redis client error', err }),
+  console.log({ msg: 'Redis client error', err }),
 );
 
 //incoming-request => client => for receiving request from api to matching engine
-
-// response-queue-${backend_id}`, => publishclient=> for sending matching engine response back to api 
-
+// response-queue-${backend_id} => publishclient => for sending matching engine response back to api
 // settlement-queue => dbWorkerclient => for db worker to fills and settlements
-
 // risk-to-matching-eng => riskEngclient => to receive perp order from risk engine
 
-
-//const ORDERBOOK: any = {
-//  BTC: {
-//    bids: [],
-//    asks: [], 
-//  },
-//  ETH: {
-//    bids: [],
-//    asks: [],
-//  },
-//};
-
-//const FILLS: any = [];
-//const BALANCES: any = [];
-//const ORDERS: any = [];
-
-const create_order = (payload: any, backend_id: string, request_id: string, request_type?: string, command?: string) => {
-
-    //if request_type is perp => fill will handle differently => will send postion of both 
-
-    console.log({ payload });
-    console.log({ ORDERBOOK });
-    const order_id: string = crypto.randomUUID();
-
-    const market = ORDERBOOK.get(payload.symbol);
-    console.log({ market });
-
-    if (!market) {
-        console.log('Market not available on orderbook');
-
-        //error market not available on orderbook
-
-        const res_data: engineResponse = {
-            request_id,
-            order_id,
-            status: 'order rejected',
-            message: 'Market not available on orderbook',
-            price: payload.price,
-            filled_quantity: 0
-        };
-
-        publishclient.lPush(
-            `response-queue-${backend_id}`,
-            JSON.stringify(res_data),
-        );
-
-        return;
-    }
-
-    //for buy => lowest available price on orderbook
-    //for sell => highest available price on orderbook
-
-    if (payload.type == 'market') {
-        //execute immediately
-        //calculate best price and update orderbook
-        console.log('market order');
-
-        //i have to track last best price and quantity
-
-        if (payload.side === 'buy') {
-            console.log({ market });
-
-            let lowest_price = 0;
-            let lowest_order: string = '';
-            let notional_sum = 0;
-
-            if (market.asks.size > 0) {
-                for (const [key, value] of market.asks.entries()) {
-                    console.log({ key, value });
-                    if (lowest_price === 0 && value.user_id !== payload.user_id) {
-                        lowest_price = value.price;
-                        lowest_order = key;
-                    } else if (value.price <= lowest_price && value.user_id !== payload.user_id) {
-                        lowest_price = value.price;
-                        lowest_order = key;
-                    }
-                }
-            }
-
-            console.log({ lowest_order });
-            console.log({ lowest_price });
-
-            let filled_quantity: any = 0;
-            let matching_orders: any = [];
-            console.log({ filled_quantityAT_153: filled_quantity });
-
-            //  what if sort the order by price then loop through it, until got filled
-
-            market.asks.forEach((k, v) => {
-                console.log({ k, v });
-
-                //order will partially or fully filled based on quantity
-
-                //  get the the all the order matching calculate total quantity until either order got fully filled or no other asset available at this price or lower
-
-                console.log({ lowest_price });
-
-                if (k.price <= lowest_price && k.user_id !== payload.user_id) {
-                    //do the matching
-                    lowest_price = k.price;
-                    lowest_order = v;
-                    console.log({ filled_quantity_AT_170: filled_quantity, payload });
-
-                    if (filled_quantity < payload.quantity) {
-                        //not fully filled yet
-                        //decrease and/or remove that asks side of this price
-
-                        console.log(`Remove this order from asks`);
-
-                        console.log({
-                            filled_quantity,
-                            quan: k.quantity,
-                            asked_quan: payload.quantity,
-                        });
-
-                        if (k.quantity > payload.quantity - filled_quantity) {
-                            //fully filed with this order only
-                            console.log(
-                                'current order quantity more than the fill required. so decrease this order quantity',
-                            );
-
-                            const current_ast: any = market.asks.get(v);
-                            console.log({ current_ast });
-
-                            const delta_qty = payload.quantity - filled_quantity;
-                            notional_sum += lowest_price * delta_qty;
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: delta_qty,
-                                price: lowest_price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: payload.user_id,
-                                sell_user_id: current_ast.user_id,
-
-                                buy_order_id: order_id,
-                                sell_order_id: current_ast.order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-
-                            filled_quantity += delta_qty;
-
-                            FILLS.push(fill);
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type: request_type, order_id, command: command || 'create-fill' }),
-                            );
-
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-
-                            market.asks.set(v, {
-                                ...k,
-                                quantity: k.quantity - delta_qty,
-                            });
-
-                        } else if (k.quantity <= payload.quantity - filled_quantity) {
-                            //remove from orderbook, increase the fill
-
-                            console.log(
-                                'current order quantity less than or equal to the fill required. so delete this order quantity',
-                            );
-
-                            const current_ast: any = market.asks.get(v);
-                            console.log({ current_ast });
-
-                            filled_quantity += current_ast.quantity;
-
-                            console.log({ filled_quantityAT_161: filled_quantity });
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: current_ast.quantity,
-                                //price: payload.price,
-                                price: lowest_price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: payload.user_id,
-                                sell_user_id: current_ast.user_id,
-
-                                buy_order_id: order_id,
-                                sell_order_id: current_ast.order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-
-
-                            FILLS.push(fill);
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
-                            );
-
-                            notional_sum += lowest_price * current_ast.quantity;
-
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-
-                            market.asks.delete(v);
-                        }
-                    }
-                } else {
-                    console.log('else called at 194');
-                    console.log('find the second best price');
-
-                    let second_lowest_price = 0;
-                    let second_lowest_id = '';
-
-                    if (market.asks.size > 0) {
-                        for (const [key, value] of market.asks.entries()) {
-                            console.log({ key, value });
-
-                            if (second_lowest_price === 0 && value.user_id !== payload.user_id) {
-                                second_lowest_price = value.price;
-                                second_lowest_id = key;
-                            } else if (
-                                value.price <= second_lowest_price &&
-                                value.price > lowest_price && value.user_id !== payload.user_id
-                            ) {
-                                second_lowest_price = value.price;
-                                second_lowest_id = key;
-                            }
-                        }
-                    }
-
-                    console.log({ second_lowest_price, second_lowest_id });
-
-                    //second lowest logic then third etc
-
-                    console.log('new lowest price');
-                    lowest_order = second_lowest_id;
-                    lowest_price = second_lowest_price;
-
-                    console.log({ lowest_price_AT_213: lowest_price });
-                }
-            });
-            console.log({ filled_quantity_OUT_LOOP: filled_quantity });
-
-            console.log('outside loop');
-
-            const avg_price = filled_quantity > 0 ? notional_sum / filled_quantity : lowest_price || 0;
-
-            const res_data: engineResponse = {
-                request_id,
-                order_id,
-                price: avg_price,
-                filled_quantity: filled_quantity,
-                status: 'order accepted',
-                message: 'Order got filled'
-            };
-            console.log({ finalOrderbook: ORDERBOOK });
-
-            publishclient.lPush(
-                `response-queue-${backend_id}`,
-                JSON.stringify(res_data),
-            );
-
-            //send fills to db worker which has both buy and sell side of order details
-            //one order can have multiple fills to i have to send every fill details to db worker
-
-            //dbWorkerclient.lPush(
-            //    `settlement-queue`,
-            //    JSON.stringify(res_data, payload),
-            //);
-            return;
-        } else if (payload.side === 'sell') {
-            console.log({ market });
-
-            let highest_price = 0;
-            let highest_order: string = '';
-            let notional_sum = 0;
-
-            if (market.bids.size > 0) {
-                for (const [key, value] of market.bids.entries()) {
-                    console.log({ key, value });
-                    if (highest_price === 0 && value.user_id !== payload.user_id) {
-                        highest_price = value.price;
-                        highest_order = key;
-                    } else if (value.price >= highest_price && value.user_id !== payload.user_id) {
-                        highest_price = value.price;
-                        highest_order = key;
-                    }
-                }
-            }
-
-            console.log({ highest_order });
-            console.log({ highest_price });
-
-            let filled_quantity: any = 0;
-            let matching_orders: any = [];
-            console.log({ filled_quantityAT_118: filled_quantity });
-
-            //  what if sort the order by price then loop through it, until got filled
-
-            market.bids.forEach((k, v) => {
-                console.log({ k, v });
-
-                //order will partially or fully filled based on quantity
-
-                //  get the the all the order matching calculate total quantity until either order got fully filled or no other asset available at this price or lower
-
-                console.log({ highest_price });
-
-                if (k.price >= highest_price && k.user_id !== payload.user_id) {
-                    //do the matching
-                    highest_price = k.price;
-                    highest_order = v;
-                    console.log({ filled_quantity_AT_133: filled_quantity, payload });
-
-                    if (filled_quantity < payload.quantity) {
-                        //not fully filled yet
-                        //decrease and/or remove that asks side of this price
-
-                        console.log(`Remove this order from asks`);
-
-                        console.log({
-                            filled_quantity,
-                            quan: k.quantity,
-                            asked_quan: payload.quantity,
-                        });
-
-                        if (k.quantity > payload.quantity - filled_quantity) {
-                            //fully filed with this order only
-                            console.log(
-                                'current order quantity more than the fill required. so decrease this order quantity',
-                            );
-
-                            const current_ast: any = market.bids.get(v);
-                            console.log({ current_ast });
-
-                            const delta_qty = payload.quantity - filled_quantity;
-                            filled_quantity += delta_qty;
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: delta_qty,
-                                //price: payload.price,
-                                price: highest_price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: current_ast.user_id,
-                                sell_user_id: payload.user_id,
-
-                                buy_order_id: current_ast.order_id,
-                                sell_order_id: order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-                            FILLS.push(fill);
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
-                            );
-                            notional_sum += highest_price * delta_qty;
-
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-
-                            market.bids.set(v, {
-                                ...k,
-                                quantity: k.quantity - delta_qty,
-                            })
-                        } else if (k.quantity <= payload.quantity - filled_quantity) {
-                            //remove from orderbook, increase the fill
-
-                            console.log(
-                                'current order quantity less than or equal to the fill required. so delete this order quantity',
-                            );
-
-                            const current_ast: any = market.bids.get(v);
-                            console.log({ current_ast });
-
-                            filled_quantity += current_ast.quantity;
-
-                            console.log({ filled_quantityAT_161: filled_quantity });
-
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: current_ast.quantity,
-                                //price: payload.price,
-                                price: highest_price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: current_ast.user_id,
-                                sell_user_id: payload.user_id,
-
-                                buy_order_id: current_ast.order_id,
-                                sell_order_id: order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-                            FILLS.push(fill);
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
-                            );
-                            notional_sum += highest_price * current_ast.quantity;
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-
-                            market.bids.delete(v);
-                        }
-                    }
-                } else {
-                    console.log('else called at 194');
-                    console.log('find the second best price');
-
-                    let second_highest_price = 0;
-                    let second_highest_id = '';
-
-                    if (market.bids.size > 0) {
-                        for (const [key, value] of market.bids.entries()) {
-                            console.log({ key, value });
-
-                            if (second_highest_price === 0 && value.user_id !== payload.user_id) {
-                                second_highest_price = value.price;
-                                second_highest_id = key;
-                            } else if (
-                                value.price >= second_highest_price &&
-                                value.price < highest_price && value.user_id !== payload.user_id
-                            ) {
-                                second_highest_price = value.price;
-                                second_highest_id = key;
-                            }
-                        }
-                    }
-
-                    console.log({ second_highest_price, second_highest_id });
-
-                    //second lowest logic then third etc
-
-                    console.log('new second_highest price');
-                    highest_order = second_highest_id;
-                    highest_price = second_highest_price;
-
-                    console.log({ lowest_price_AT_213: highest_price });
-                }
-            });
-            console.log({ filled_quantity_OUT_LOOP: filled_quantity });
-
-            console.log('outside loop');
-
-            const avg_price = filled_quantity > 0 ? notional_sum / filled_quantity : highest_price || 0;
-            const res_data: engineResponse = {
-                request_id,
-                order_id,
-                price: avg_price,
-                filled_quantity: filled_quantity,
-                status: 'order accepted',
-                message: 'Order got filled'
-            };
-            console.log({ finalOrderbook: ORDERBOOK });
-
-            publishclient.lPush(
-                `response-queue-${backend_id}`,
-                JSON.stringify(res_data),
-            );
-
-            //dbWorkerclient.lPush(
-            //    `settlement-queue`,
-            //    JSON.stringify({ ...res_data, ...payload }),
-            //);
-            return;
-        }
-    } else {
-        if (payload.side == 'buy') {
-            //fill order, decrease user wallet balance , increase that asset , decrease that asset quantity from orderbook
-            console.log({ market });
-            let lowest_price = 0;
-            let lowest_order: string = '';
-
-            if (market.asks.size > 0) {
-                for (const [key, value] of market.asks.entries()) {
-                    console.log({ key, value });
-                    if (lowest_price === 0 && value.user_id !== payload.user_id) {
-                        lowest_price = value.price;
-                        lowest_order = key;
-                    } else if (value.price <= lowest_price && value.user_id !== payload.user_id) {
-                        lowest_price = value.price;
-                        lowest_order = key;
-                    }
-                }
-            }
-
-            console.log({ lowest_order });
-            console.log({ lowest_price });
-
-            //  if there is no asks then no need to compare
-
-            if (
-                market.asks.size == 0 ||
-                (market.asks.size > 0 && payload.price < lowest_price)
-            ) {
-                console.log('push to orderbook');
-
-                //const order_id: string = crypto.randomUUID();
-
-                //const set_asset: Order = {
-                //  order_id,
-
-                //  side: payload.side,
-                //  price: payload.price,
-                //  quantity: payload.quantity,
-                //  user_id: payload.user_id,
-                //  request_id,
-                //  type: 'limit',
-                //  asset: payload.asset,
-                //  fills: [],
-                //  created_at: Date.now(),
-                //};
-
-                //console.log({ set_asset });
-
-                market.bids.set(order_id, {
-                    order_id,
-
-                    side: payload.side,
-                    price: payload.price,
-                    quantity: payload.quantity,
-                    user_id: payload.user_id,
-                    request_id,
-
-                    type: payload.type,
-
-                    symbol: payload.symbol,
-
-                    created_at: Date.now(),
-                });
-                console.log({ updatedOrderbook: ORDERBOOK });
-
-                console.log({ bids: market.bids });
-
-                const risk_eng_payload = {
-                    order: {
-                        order_id,
-                        side: payload.side,
-                        price: payload.price,
-                        quantity: payload.quantity,
-                        user_id: payload.user_id,
-                        request_id,
-                        type: payload.type,
-                        symbol: payload.symbol,
-                        created_at: Date.now(),
-                    },
-                    command: "create-order"
-                };
-
-                riskEngPubclient.lPush(
-                    `matching-to-risk-pub-queue`,
-                    JSON.stringify(risk_eng_payload),
-                );
-
-
-                const res_data: engineResponse = {
-                    request_id,
-                    order_id,
-                    price: payload.price,
-                    filled_quantity: 0,
-                    status: 'order accepted',
-                    message: 'Sitting on orderbook'
-                };
-
-                publishclient.lPush(
-                    `response-queue-${backend_id}`,
-                    JSON.stringify(res_data),
-                );
-                dbWorkerclient.lPush(
-                    `settlement-queue`,
-                    JSON.stringify({ ...res_data, payload, command: "create-order" }),
-                );
-                return;
-            } else {
-                console.log('else called');
-                console.log('price got matched or available at lower price');
-
-                //order will partially or fully filled
-
-                //decrease the quantity from orderbook
-                //if no other quantity on orderbook of that asset then remove the asset as well
-
-                //get the orders that are filled , and remove them
-
-                console.log({ ORDERBOOKAT219: ORDERBOOK });
-
-                let total_quantity = 0;
-                let matching_orders: any = [];
-
-                market.asks.forEach((k, v) => {
-                    console.log({ k, v });
-
-                    //order will partially or fully filled based on quantity
-
-                    //  get the the all the order matching at this price, calculate total quantity until either order got fully filled or no other asset available at this price or lower
-
-                    if (k.price <= payload.price && k.user_id !== payload.user_id) {
-                        if (payload.quantity > total_quantity) {
-                            total_quantity += k.quantity;
-                            console.log({ total_quantity, quan: k.quantity });
-                            console.log('push to matching order until got filled filled ');
-
-                            matching_orders.push(v);
-                        }
-                    }
-                });
-
-                console.log({ total_quantity, matching_orders });
-
-                if (total_quantity >= payload.quantity) {
-                    //fully filled
-                    //decrease and/or remove that asks side of this price
-                    let filled_quantity: any = 0;
-
-                    for (let i = 0; i < matching_orders.length; i++) {
-                        console.log(`Remove this order from asks: ${matching_orders[i]}`);
-                        console.log({ currentORD: market.asks.get(matching_orders[i]) });
-
-                        const current_ast: any = market.asks.get(matching_orders[i]);
-                        console.log({ current_ast });
-
-                        if (current_ast.quantity > payload.quantity - filled_quantity) {
-                            console.log(
-                                'current order quantity more than the fill required. so decrease this order quantity',
-                            );
-
-                            filled_quantity = payload.quantity;
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: payload.quantity,
-                                price: payload.price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: payload.user_id,
-                                sell_user_id: current_ast.user_id,
-
-                                buy_order_id: order_id,
-                                sell_order_id: current_ast.order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-
-                            //decrease the order quantity, increase the fill
-
-
-
-
-                            console.log({ matching_orders, currrentMatch: matching_orders[i] });
-
-
-                            FILLS.push(fill);
-
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
-                            );
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-
-
-                            market.asks.set(matching_orders[i], {
-                                ...current_ast,
-                                quantity:
-                                    current_ast.quantity - (payload.quantity - filled_quantity),
-                            });
-
-                        } else if (
-                            current_ast.quantity <=
-                            payload.quantity - filled_quantity
-                        ) {
-                            //remove from orderbook, increase the fill
-
-                            console.log(
-                                'current order quantity less than or equal to the fill required. so delete this order quantity',
-                            );
-
-                            filled_quantity += current_ast.quantity;
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: current_ast.quantity,
-                                price: payload.price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: payload.user_id,
-                                sell_user_id: current_ast.user_id,
-
-                                buy_order_id: order_id,
-                                sell_order_id: current_ast.order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-                            FILLS.push(fill);
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
-                            );
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-
-                            market.asks.delete(matching_orders[i]);
-                        }
-                    }
-
-                    console.log({ asks: market.asks });
-
-                    console.log({ filled_quantity });
-
-                    const res_data: engineResponse = {
-                        request_id,
-                        order_id,
-                        price: payload.price,
-                        filled_quantity: filled_quantity,
-                        status: 'order accepted',
-                        message: 'Order got filled'
-                    };
-                    console.log({ finalOrderbook: ORDERBOOK });
-
-                    publishclient.lPush(
-                        `response-queue-${backend_id}`,
-                        JSON.stringify(res_data),
-                    );
-                    //dbWorkerclient.lPush(
-                    //    `settlement-queue`,
-                    //    JSON.stringify({ ...res_data, ...payload }),
-                    //);
-                    return;
-                } else {
-                    //partially filled
-                    let filled_orders = [];
-                    let filled_quantity = 0;
-
-                    for (let i = 0; i < matching_orders.length; i++) {
-                        console.log(`Remove this order from bids: ${matching_orders[i]}`);
-                        console.log({ currentORD: market.bids.get(matching_orders[i]) });
-
-                        const current_ast: any = market.asks.get(matching_orders[i]);
-                        console.log({ current_ast });
-
-                        if (current_ast.quantity > payload.quantity - filled_quantity) {
-                            console.log(
-                                'current order quantity more than the fill required. so decrease this order quantity',
-                            );
-
-                            //decrease the order quantity, increase the fill
-
-                            market.asks.set(matching_orders[i], {
-                                ...current_ast,
-                                quantity:
-                                    current_ast.quantity - (payload.quantity - filled_quantity),
-                            });
-                            filled_quantity = payload.quantity;
-                        } else if (
-                            current_ast.quantity <=
-                            payload.quantity - filled_quantity
-                        ) {
-                            //remove from orderbook, increase the fill
-
-                            console.log(
-                                'current order quantity less than or equal to the fill required. so delete this order quantity',
-                            );
-
-                            filled_quantity += current_ast.quantity;
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: current_ast.quantity,
-                                price: payload.price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: payload.user_id,
-                                sell_user_id: current_ast.user_id,
-
-                                buy_order_id: order_id,
-                                sell_order_id: current_ast.order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-                            FILLS.push(fill);
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
-                            );
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-
-                            market.asks.delete(matching_orders[i]);
-                        }
-                    }
-                    console.log({ bids: market.bids });
-
-                    console.log({ asks: market.asks });
-
-                    console.log({ filled_quantity });
-
-
-                    market.bids.set(order_id, {
-                        order_id,
-
-                        side: payload.side,
-                        price: payload.price,
-                        quantity: payload.quantity - filled_quantity,
-                        user_id: payload.user_id,
-                        request_id,
-
-                        type: payload.type,
-
-                        symbol: payload.symbol,
-
-                        created_at: Date.now(),
-                    });
-
-                    const res_data: engineResponse = {
-                        request_id,
-                        order_id,
-                        price: payload.price,
-                        filled_quantity: filled_quantity,
-                        status: 'order accepted',
-                        message: 'Order is partially filled'
-                    };
-                    console.log({ finalOrderbook: ORDERBOOK });
-
-                    publishclient.lPush(
-                        `response-queue-${backend_id}`,
-                        JSON.stringify(res_data),
-                    );
-                    //dbWorkerclient.lPush(
-                    //    `settlement-queue`,
-                    //    JSON.stringify({ ...res_data, ...payload }),
-                    //);
-                    return;
-                }
-
-                //  update orderbook
-            }
-        } else if (payload.side == 'sell') {
-            //fill order, increase user wallet balance , decrease that asset , increase that asset quantity in orderbook
-
-            let highest_price = 0;
-            let highest_order: string = '';
-
-            if (market.bids.size > 0) {
-                for (const [key, value] of market.bids.entries()) {
-                    console.log({ key, value });
-                    if (highest_price === 0 && value.user_id !== payload.user_id) {
-                        highest_price = value.price;
-                        highest_order = key;
-                    } else if (value.price <= highest_price && value.user_id !== payload.user_id) {
-                        highest_price = value.price;
-                        highest_order = key;
-                    }
-                }
-            }
-
-            console.log({ highest_order });
-            console.log({ highest_price });
-
-            if (
-                market.bids.size == 0 ||
-                (market.bids.size > 0 && payload.price > highest_price)
-            ) {
-                console.log('push to orderbook');
-
-
-
-                console.log({ ORDERBOOK });
-                console.log({ bids: market.bids });
-
-                market.asks.set(order_id, {
-                    order_id,
-                    side: payload.side,
-                    price: payload.price,
-                    quantity: payload.quantity,
-                    user_id: payload.user_id,
-                    request_id,
-                    type: payload.type,
-                    symbol: payload.symbol,
-                    created_at: Date.now(),
-                });
-
-                console.log({ bids: market.bids });
-
-                const risk_eng_payload = {
-                    order: {
-                        order_id,
-                        side: payload.side,
-                        price: payload.price,
-                        quantity: payload.quantity,
-                        user_id: payload.user_id,
-                        request_id,
-                        type: payload.type,
-                        symbol: payload.symbol,
-                        created_at: Date.now(),
-                    },
-                    command: "create-order"
-                };
-
-                riskEngPubclient.lPush(
-                    `matching-to-risk-pub-queue`,
-                    JSON.stringify(risk_eng_payload),
-                );
-
-
-                const res_data: engineResponse = {
-                    request_id,
-                    order_id,
-                    price: payload.price,
-                    filled_quantity: 0,
-                    status: 'order accepted',
-                    message: 'Sitting on orderbook'
-                };
-
-                publishclient.lPush(
-                    `response-queue-${backend_id}`,
-                    JSON.stringify(res_data),
-                );
-                dbWorkerclient.lPush(
-                    `settlement-queue`,
-                    JSON.stringify({ ...res_data, payload, command: "create-order" }),
-                );
-                return;
-            } else {
-                console.log('else called');
-                //  update orderbook
-
-                console.log('price got matched or available at higher price');
-
-                let total_quantity = 0;
-                let matching_orders: any = [];
-
-                market.bids.forEach((k, v) => {
-                    console.log({ k, v });
-
-                    //order will partially or fully filled based on quantity
-
-                    //  get the the all the order matching at this price, calculate total quantity until either order got fully filled or no other asset available at this price or higher
-
-                    if (k.price >= payload.price && k.user_id != payload.user_id) {
-                        if (payload.quantity > total_quantity) {
-                            total_quantity += k.quantity;
-                            console.log({ total_quantity, quan: k.quantity });
-                            console.log('push to matching order until got filled filled ');
-
-                            matching_orders.push(v);
-                        }
-                    }
-                });
-                console.log({ total_quantity, matching_orders });
-
-                if (total_quantity >= payload.quantity) {
-                    //fully filled
-                    //decrease and/or remove that asks side of this price
-                    let filled_orders = [];
-                    let filled_quantity: any = 0;
-
-                    for (let i = 0; i < matching_orders.length; i++) {
-                        console.log(`Remove this order from asks: ${matching_orders[i]}`);
-                        console.log({ currentORD: market.bids.get(matching_orders[i]) });
-
-                        const current_ast: any = market.bids.get(matching_orders[i]);
-                        console.log({ current_ast });
-
-                        if (current_ast.quantity > payload.quantity - filled_quantity) {
-                            console.log(
-                                'current order quantity more than the fill required. so decrease this order quantity',
-                            );
-
-                            //decrease the order quantity, increase the fill
-
-                            market.bids.set(matching_orders[i], {
-                                ...current_ast,
-                                quantity:
-                                    current_ast.quantity - (payload.quantity - filled_quantity),
-                            });
-                            filled_quantity = payload.quantity;
-                        } else if (
-                            current_ast.quantity <=
-                            payload.quantity - filled_quantity
-                        ) {
-                            //remove from orderbook, increase the fill
-
-                            console.log(
-                                'current order quantity less than or equal to the fill required. so delete this order quantity',
-                            );
-
-                            filled_quantity += current_ast.quantity;
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: current_ast.quantity,
-                                price: payload.price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: current_ast.user_id,
-                                sell_user_id: payload.user_id,
-
-                                buy_order_id: current_ast.order_id,
-                                sell_order_id: order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-                            FILLS.push(fill);
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
-                            );
-
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-
-
-                            market.bids.delete(matching_orders[i]);
-                        }
-                    }
-
-                    console.log({ bids: market.bids });
-
-                    console.log({ filled_quantity });
-
-                    const res_data: engineResponse = {
-                        request_id,
-                        order_id,
-                        price: payload.price,
-                        filled_quantity: filled_quantity,
-                        status: 'order accepted',
-                        message: 'Order got filled'
-                    };
-                    console.log({ finalOrderbook: ORDERBOOK });
-
-
-
-                    publishclient.lPush(
-                        `response-queue-${backend_id}`,
-                        JSON.stringify(res_data),
-                    );
-                    //dbWorkerclient.lPush(
-                    //    `settlement-queue`,
-                    //    JSON.stringify({ ...res_data, ...payload }),
-                    //);
-                    return;
-                } else {
-                    //partially filled
-                    let filled_orders = [];
-                    let filled_quantity = 0;
-
-                    for (let i = 0; i < matching_orders.length; i++) {
-                        console.log(`Remove this order from asks: ${matching_orders[i]}`);
-                        console.log({ currentORD: market.asks.get(matching_orders[i]) });
-
-                        const current_ast: any = market.bids.get(matching_orders[i]);
-                        console.log({ current_ast });
-
-                        if (current_ast.quantity > payload.quantity - filled_quantity) {
-                            console.log(
-                                'current order quantity more than the fill required. so decrease this order quantity',
-                            );
-
-                            //decrease the order quantity, increase the fill
-
-                            market.bids.set(matching_orders[i], {
-                                ...current_ast,
-                                quantity:
-                                    current_ast.quantity - (payload.quantity - filled_quantity),
-                            });
-                            filled_quantity = payload.quantity;
-                        } else if (
-                            current_ast.quantity <=
-                            payload.quantity - filled_quantity
-                        ) {
-                            //remove from orderbook, increase the fill
-
-                            console.log(
-                                'current order quantity less than or equal to the fill required. so delete this order quantity',
-                            );
-
-                            filled_quantity += current_ast.quantity;
-
-                            const fill: Fill = {
-                                type: payload.type,
-                                quantity: payload.quantity,
-                                filled_quantity: current_ast.quantity,
-                                price: payload.price,
-                                symbol: payload.symbol,
-
-                                buy_user_id: current_ast.user_id,
-                                sell_user_id: payload.user_id,
-
-                                buy_order_id: current_ast.order_id,
-                                sell_order_id: order_id,
-
-                                fill_id: crypto.randomUUID(),
-                                created_at: Date.now(),
-                                order_type: payload.side,
-
-                            };
-                            console.log({ fill });
-                            FILLS.push(fill);
-
-                            dbWorkerclient.lPush(
-                                `settlement-queue`,
-                                JSON.stringify({ fill, payload, request_type, order_id, command: command || 'create-fill' }),
-                            );
-
-                            const risk_eng_payload = {
-                                fill: fill,
-                                command: "fill-order"
-                            };
-
-                            riskEngPubclient.lPush(
-                                `matching-to-risk-pub-queue`,
-                                JSON.stringify(risk_eng_payload),
-                            );
-                            market.bids.delete(matching_orders[i]);
-                        }
-                    }
-                    console.log({ bids: market.bids });
-
-                    console.log({ filled_quantity });
-
-                    market.asks.set(order_id, {
-                        order_id,
-                        side: payload.side,
-                        price: payload.price,
-                        quantity: payload.quantity - filled_quantity,
-                        user_id: payload.user_id,
-                        request_id,
-                        type: payload.type,
-                        symbol: payload.symbol,
-                        created_at: Date.now(),
-                    });
-
-                    const res_data: engineResponse = {
-                        request_id,
-                        order_id,
-                        price: payload.price,
-                        filled_quantity: filled_quantity,
-                        status: 'order accepted',
-                        message: 'Order got partially filled'
-                    };
-                    console.log({ finalOrderbook: ORDERBOOK });
-
-                    publishclient.lPush(
-                        `response-queue-${backend_id}`,
-                        JSON.stringify(res_data),
-                    );
-                    //dbWorkerclient.lPush(
-                    //    `settlement-queue`,
-                    //    JSON.stringify({ ...res_data, ...payload }),
-                    //);
-                    return;
-                }
-            }
-        }
-    }
+const engine = new MatchingEngine();
+
+const publishResult = (result: EngineResult, backend_id: string) => {
+  for (const message of result.settlement) {
+    dbWorkerclient.lPush('settlement-queue', JSON.stringify(message));
+  }
+
+  for (const message of result.risk) {
+    riskEngPubclient.lPush('matching-to-risk-pub-queue', JSON.stringify(message));
+  }
+
+  if (result.response !== undefined && result.response !== null) {
+    publishclient.lPush(
+      `response-queue-${backend_id}`,
+      JSON.stringify(result.response),
+    );
+  }
 };
 
-const cancel_order = (payload: any, backend_id: string, request_id: string) => {
-    //todo
-    //cancel order by order by and remove from orderbook
-    console.log({ payload });
-    console.log({ ORDERBOOK });
-
-    console.log({ ORDERBOOK });
-    let order: any;
-    ORDERBOOK.forEach((key, value) => {
-        console.log({ key, value });
-
-        key.asks.forEach((v, k) => {
-            console.log({ v, k, payload });
-
-            if (v.order_id == payload) {
-                console.log({ k, v });
-
-                order = v;
-
-                ORDERBOOK.get(value)?.asks.delete(k);
-            }
-        });
-        key.bids.forEach((v, k) => {
-            console.log({ v, k, payload });
-            if (v.order_id == payload) {
-                order = v;
-                console.log({ k, v });
-
-                ORDERBOOK.get(value)?.bids.delete(k);
-            }
-        });
-    });
-
-    console.log({ order });
-
-    console.log({ ORDERBOOK });
-    console.log('order cancelled');
-
-
-    if (!order) {
-        const res_data: engineResponse = {
-            request_id,
-            order_id: '',
-            filled_quantity: 0,
-            price: payload.price,
-            status: 'order pending',
-            message: 'order not found'
-        };
-
-        publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
-        return;
-    }
-
-    const res_data: engineResponse = {
-        request_id,
-        order_id: order.id,
-        price: payload.price,
-        data: order,
-        filled_quantity: 0,
-        status: 'order cancelled',
-        message: ''
-    };
-
-    publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
-
-    const risk_eng_payload = {
-        order: order,
-        command: "cancel-order"
-    };
-    riskEngPubclient.lPush(
-        `matching-to-risk-pub-queue`,
-        JSON.stringify(risk_eng_payload),
-    );
-
-    const settle = { request_id, filled_quantity: 0, message: '', ...order, fill: {}, payload: { symbol: order.symbol }, command: "cancel-order" };
-
-    dbWorkerclient.lPush(
-        `settlement-queue`,
-        JSON.stringify(settle),
-    );
-    return;
+const create_order = (
+  payload: OrderInput,
+  backend_id: string,
+  request_id: string,
+  request_type?: string,
+  command?: string,
+) => {
+  publishResult(
+    engine.createOrder(payload, request_id, { request_type, command }),
+    backend_id,
+  );
 };
 
-const get_order = (payload: any, backend_id: string, request_id: string) => {
-    //todo
-    //get order details by order id
-    console.log({ payload });
-    console.log({ ORDERBOOK });
-    let order;
-    ORDERBOOK.forEach((v, k) => {
-        v.asks.forEach((v, k) => {
-            console.log({ v, k, payload });
+const cancel_order = (payload: string, backend_id: string, request_id: string) => {
+  publishResult(engine.cancelOrder(payload, request_id), backend_id);
+};
 
-            if (v.order_id == payload) {
-                order = v;
-            }
-        });
-        v.bids.forEach((v, k) => {
-            console.log({ v, k, payload });
-            if (v.order_id == payload) {
-                order = v;
-            }
-        });
-    });
-
-    console.log({ order });
-
-    const res_data: engineResponse = {
-        request_id,
-        data: order,
-        status: 'order pending',
-        message: 'Order is Sitting on orderbook',
-        order_id: '',
-        price: 0,
-        filled_quantity: 0
-    };
-
-    publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
-    return;
+const get_order = (payload: string, backend_id: string, request_id: string) => {
+  publishResult(engine.getOrder(payload, request_id), backend_id);
 };
 
 const get_balance = (payload: any, backend_id: string, request_id: string) => {
-    //todo
-    //get the user assets by user id
+  publishResult(engine.getBalance(payload, request_id), backend_id);
 };
 
-const get_depth = (payload: any, backend_id: string, request_id: string) => {
-    //aggregated orderbook {bids:[[price,size]...], asks:[[price,size]...], timestamp}
-    const market = ORDERBOOK.get(payload);
-
-    let asks: any[] = [];
-    let bids: any[] = [];
-
-    if (market) {
-        const agg_asks: any = {};
-        market.asks.forEach((v: any) => {
-            agg_asks[v.price] = (agg_asks[v.price] || 0) + v.quantity;
-        });
-        Object.entries(agg_asks).forEach(([price, size]) => {
-            asks.push([Number(price), size]);
-        });
-
-        const agg_bids: any = {};
-        market.bids.forEach((v: any) => {
-            agg_bids[v.price] = (agg_bids[v.price] || 0) + v.quantity;
-        });
-        Object.entries(agg_bids).forEach(([price, size]) => {
-            bids.push([Number(price), size]);
-        });
-    }
-
-    const res_data = {
-        request_id,
-        symbol: payload,
-        bids: bids,
-        asks: asks,
-        timestamp: Date.now()
-    };
-
-    publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
-    return;
+const get_depth = (payload: string, backend_id: string, request_id: string) => {
+  publishResult(engine.getDepth(payload, request_id), backend_id);
 };
 
-const create_asset = (payload: any, backend_id: string, request_id: string) => {
-    console.log({ payload });
-    const ordrbook = Object.fromEntries(ORDERBOOK);
-    console.log({ ORDERBOOK });
-    console.log({ ordrbook });
-
-    const existing_ast = ASSETS.find(
-        (a) => a.name == payload.name || a.symbol == payload.symbol,
-    );
-
-    console.log({ existing_ast });
-
-    if (existing_ast) {
-        const res_data = {
-            request_id,
-            ASSETS,
-            ORDERBOOK,
-        };
-
-        publishclient.lPush(
-            `response-queue-${backend_id}`,
-            JSON.stringify(res_data),
-        );
-        return;
-    }
-
-    ASSETS.push(payload);
-
-    console.log({ ASSETS });
-
-    ORDERBOOK.set(payload.symbol, {
-        asks: new Map(),
-        bids: new Map(),
-    });
-
-    const res_data = {
-        request_id,
-        ASSETS,
-        ORDERBOOK,
-    };
-
-    publishclient.lPush(`response-queue-${backend_id}`, JSON.stringify(res_data));
+const create_asset = (payload: Asset, backend_id: string, request_id: string) => {
+  publishResult(engine.createAsset(payload, request_id), backend_id);
 };
 
-let engine_status: engineStatus = 'down'
+let engine_status: engineStatus = 'down';
 
 await Promise.all([
-    client.connect(),
-    publishclient.connect(),
-    dbWorkerclient.connect(),
-    riskEngclient.connect(),
-    riskEngPubclient.connect(),
-    liquidationClient.connect()
-])
+  client.connect(),
+  publishclient.connect(),
+  dbWorkerclient.connect(),
+  riskEngclient.connect(),
+  riskEngPubclient.connect(),
+  liquidationClient.connect(),
+]);
 
 while (1) {
-    console.log("All redis services connected successfully");
+  if (engine_status == 'down') {
+    engine_status = 'pending';
+  }
+  //get the asset and markets from db, last snapshot from s3 and construct orderbook
+  //matching engine will not accept order until it create and all markets spot and perps for all asset pairs
 
-    if (engine_status == 'down') {
-        engine_status = 'pending'
-    }
-    //get the asset and markets from db, last snapshot from s3 and construct orderbook
+  if (engine_status != 'ready') {
+    const markets = await prisma.market.findMany();
 
-    //matching engine will not accept order until it create and all markets spot and perps for all asset pairs
-
-    if (engine_status != 'ready') {
-
-        const markets = await prisma.market.findMany();
-
-        console.log({ markets });
-        if (!markets) {
-            //error market not intitialized
-
-        }
-
-        for (let i = 0; i < markets.length; i++) {
-
-            ORDERBOOK.set(markets[i]?.symbol || 'Undefined', {
-                asks: new Map(),
-                bids: new Map()
-            })
-        }
-
-        engine_status = 'ready'
+    if (!markets) {
+      //error market not intitialized
     }
 
-    const liqudation_req = await client.brPop('liquidation-to-matching-eng', 0.1);
-
-    console.log({ liqudation_req });
-
-    const parsed_liquidation_req = liqudation_req && JSON.parse(liqudation_req.element);
-    console.log({ parsed_liquidation_req });
-
-    const incoming_req = await client.brPop('incoming-request', 0.1);
-
-    //  const res = await client.brPop('create-order', 2);
-
-    console.log({ incoming_req });
-
-    console.log({ ORDERBOOK });
-
-    //console.log({ engine_status });
-
-    console.log({ engine_status });
-
-    console.log({ FILLS });
-
-    //if (!incoming_req) {
-    //    continue;
-    //}
-    const parsed_req = incoming_req && JSON.parse(incoming_req.element);
-    console.log({ parsed_req });
-
-
-    if (engine_status != 'ready') {
-        const res_data: engineResponse = {
-            request_id: parsed_req.request_id,
-            status: 'order rejected',
-            message: 'Matching engine is not ready to accept orders',
-            order_id: '',
-            price: 0,
-            filled_quantity: 0
-        };
-
-        publishclient.lPush(
-            `response-queue-${parsed_req.BACKEND_ID}`,
-            JSON.stringify(res_data),
-        );
+    for (let i = 0; i < markets.length; i++) {
+      engine.orderbook.set(markets[i]?.symbol || 'Undefined', {
+        asks: new Map(),
+        bids: new Map(),
+      });
     }
 
-    //  do matching engine, check command type, do matching engine stuff and return price and identifier
+    engine_status = 'ready';
+  }
 
-    //  add engine command type checks, engine request and response type
 
-    //  fills returned with each matched trade
-    //depth grouped by price level
+  const req = await client.brPop(
+    ['liquidation-to-matching-eng', 'incoming-request', 'risk-to-matching-eng'],
+    0,
+  );
 
-    //  lock funds/assets for open limit orders
+  let parsed_liquidation_req;
+  let parsed_req;
+  let parsed_risk_req;
 
-    // order statuses:
-    //open
-    //partially_filled
-    //filled
-    //cancelled
-
-    const incoming_risk_req = await riskEngclient.brPop("risk-to-matching-eng", 0.1);
-
-    const parsed_risk_req = incoming_risk_req && JSON.parse(incoming_risk_req.element)
-
-    if (parsed_liquidation_req) {
-        console.log("force liquidation");
-        console.log({ parsed_liquidation_req });
-
-        if (parsed_liquidation_req.command == 'forced-liquidate') {
-            create_order(
-                parsed_liquidation_req.payload,
-                parsed_liquidation_req.BACKEND_ID,
-                parsed_liquidation_req.request_id
-            );
-        }
+  if (req) {
+    if (req.key === 'liquidation-to-matching-eng') {
+      parsed_liquidation_req = JSON.parse(req.element);
+    } else if (req.key === 'incoming-request') {
+      parsed_req = JSON.parse(req.element);
+    } else if (req.key === 'risk-to-matching-eng') {
+      parsed_risk_req = JSON.parse(req.element);
     }
+  }
 
-    if (parsed_req) {
-        if (parsed_req.command === 'create-order') {
-            console.log('create order called');
+  if (engine_status != 'ready' && parsed_req) {
+    const res_data: engineResponse = {
+      request_id: parsed_req.request_id,
+      status: 'order rejected',
+      message: 'Matching engine is not ready to accept orders',
+      order_id: '',
+      price: 0,
+      filled_quantity: 0,
+    };
 
-            const price = Number(parsed_req.payload.price);
-            const quantity = Number(parsed_req.payload.quantity);
+    publishclient.lPush(
+      `response-queue-${parsed_req.BACKEND_ID}`,
+      JSON.stringify(res_data),
+    );
+  }
 
-            console.log({ price, quantity });
-
-
-            create_order(
-                { ...parsed_req.payload, price, quantity },
-                parsed_req.BACKEND_ID,
-                parsed_req.request_id,
-            );
-        } else if (parsed_req.command === 'cancel-order') {
-            cancel_order(
-                parsed_req.payload,
-                parsed_req.BACKEND_ID,
-                parsed_req.request_id,
-            );
-        } else if (parsed_req.command === 'get-order') {
-            get_order(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
-        } else if (parsed_req.command === 'get-balance') {
-            get_balance(
-                parsed_req.payload,
-                parsed_req.BACKEND_ID,
-                parsed_req.request_id,
-            );
-        } else if (parsed_req.command === 'get-depth') {
-            get_depth(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
-        } else if (parsed_req.command === 'create-asset') {
-            create_asset(
-                parsed_req.payload,
-                parsed_req.BACKEND_ID,
-                parsed_req.request_id,
-            );
-        }
+  if (parsed_liquidation_req) {
+    if (parsed_liquidation_req.command == 'forced-liquidate') {
+      create_order(
+        parsed_liquidation_req.payload,
+        parsed_liquidation_req.BACKEND_ID,
+        parsed_liquidation_req.request_id,
+      );
     }
+  }
 
-    if (parsed_risk_req) {
-        console.log({ parsed_risk_req });
+  if (parsed_req) {
+    if (parsed_req.command === 'create-order') {
+      const price = Number(parsed_req.payload.price);
+      const quantity = Number(parsed_req.payload.quantity);
 
-        if (parsed_risk_req.command === 'create-order') {
-            console.log('PERP create order called');
-
-            const price = Number(parsed_risk_req.payload.price);
-            const quantity = Number(parsed_risk_req.payload.quantity);
-
-            create_order(
-                { ...parsed_risk_req.payload, price, quantity },
-                parsed_risk_req.BACKEND_ID,
-                parsed_risk_req.request_id,
-                "perp"
-            );
-        } else if (parsed_risk_req.command === 'close-position') {
-            console.log('PERP close order called');
-
-            const price = Number(parsed_risk_req.payload.price);
-            const quantity = Number(parsed_risk_req.payload.quantity);
-
-            create_order(
-                { ...parsed_risk_req.payload, price, quantity },
-                parsed_risk_req.BACKEND_ID,
-                parsed_risk_req.request_id,
-                "perp",
-                "close-position"
-            );
-        }
+      create_order(
+        { ...parsed_req.payload, price, quantity },
+        parsed_req.BACKEND_ID,
+        parsed_req.request_id,
+      );
+    } else if (parsed_req.command === 'cancel-order') {
+      cancel_order(
+        parsed_req.payload,
+        parsed_req.BACKEND_ID,
+        parsed_req.request_id,
+      );
+    } else if (parsed_req.command === 'get-order') {
+      get_order(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
+    } else if (parsed_req.command === 'get-balance') {
+      get_balance(
+        parsed_req.payload,
+        parsed_req.BACKEND_ID,
+        parsed_req.request_id,
+      );
+    } else if (parsed_req.command === 'get-depth') {
+      get_depth(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
+    } else if (parsed_req.command === 'create-asset') {
+      create_asset(
+        parsed_req.payload,
+        parsed_req.BACKEND_ID,
+        parsed_req.request_id,
+      );
     }
+  }
+
+  if (parsed_risk_req) {
+    if (parsed_risk_req.command === 'create-order') {
+      const price = Number(parsed_risk_req.payload.price);
+      const quantity = Number(parsed_risk_req.payload.quantity);
+
+      create_order(
+        { ...parsed_risk_req.payload, price, quantity },
+        parsed_risk_req.BACKEND_ID,
+        parsed_risk_req.request_id,
+        'perp',
+      );
+    } else if (parsed_risk_req.command === 'close-position') {
+      const price = Number(parsed_risk_req.payload.price);
+      const quantity = Number(parsed_risk_req.payload.quantity);
+
+      create_order(
+        { ...parsed_risk_req.payload, price, quantity },
+        parsed_risk_req.BACKEND_ID,
+        parsed_risk_req.request_id,
+        'perp',
+        'close-position',
+      );
+    }
+  }
 }
