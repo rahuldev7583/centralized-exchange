@@ -87,6 +87,73 @@ leverageClient.on('error', (err: any) =>
 leverageClient.connect();
 console.log('leverage Connected');
 
+
+const responseConsumer = createClient({ url: process.env.REDIS_URL });
+
+responseConsumer.on('error', (err: any) =>
+  console.log({ msg: 'Response consumer error', err }),
+);
+
+const RESPONSE_QUEUES = [
+  `response-queue-${BACKEND_ID}`,
+  `response-queue-perp-${BACKEND_ID}`,
+  `leverage-res-queue-${BACKEND_ID}`,
+];
+
+interface PendingResponse {
+  resolve: (value: any) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingResponses = new Map<string, PendingResponse>();
+
+async function startResponseConsumer() {
+  await responseConsumer.connect();
+  console.log('Response consumer connected');
+  while (true) {
+    try {
+      const msg = await responseConsumer.brPop(RESPONSE_QUEUES, 0);
+      if (!msg) continue;
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(msg.element);
+      } catch {
+        continue;
+      }
+
+      const requestId = parsed?.request_id;
+      if (!requestId) continue;
+
+      const pending = pendingResponses.get(requestId);
+      if (!pending) {
+        // No waiter (already timed out, or never registered) — drop it.
+        continue;
+      }
+
+      pendingResponses.delete(requestId);
+      clearTimeout(pending.timer);
+      pending.resolve(parsed);
+    } catch (err) {
+      console.log({ msg: 'Response consumer error, retrying', err });
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
+
+
+export function waitForResponse(request_id: string, timeoutMs: number): Promise<any> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingResponses.delete(request_id);
+      resolve(null);
+    }, timeoutMs);
+    pendingResponses.set(request_id, { resolve, timer });
+  });
+}
+
+startResponseConsumer();
+
 export async function get_identifier(queue: string, backend?: boolean) {
   const res_client = createClient({ url: process.env.REDIS_URL });
 

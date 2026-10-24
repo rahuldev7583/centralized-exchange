@@ -179,7 +179,7 @@ const createORUpdateLeverage = async (data: any) => {
         };
 
         leveragePubclient.lPush(
-            `leverage-res-queue`,
+            `leverage-res-queue-${data.BACKEND_ID}`,
             JSON.stringify(res_data),
         );
 

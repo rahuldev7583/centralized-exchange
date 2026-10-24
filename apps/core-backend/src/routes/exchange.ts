@@ -1,11 +1,10 @@
 import express from 'express';
-import { BACKEND_ID, client, riskEngineclient, leverageClient } from '..';
+import { BACKEND_ID, client, riskEngineclient, leverageClient, waitForResponse } from '..';
 import { find_asset, find_market, get_balance } from '../middleware/exchange';
 import { Prisma, prisma } from 'database';
 import { scaledDecimal } from 'shared-types';
 import { Order } from '../types/user';
 import { ZodError } from 'zod';
-import { createClient } from 'redis';
 
 if (!process.env.REDIS_URL) {
     throw new Error('REDIS_URL is not set');
@@ -80,39 +79,10 @@ function buildDemoTrades(symbol: string) {
     });
 }
 
-async function waitForResponse(queue: string, request_id: string, timeoutMs: number): Promise<any | null> {
-    const res_client = createClient({ url: process.env.REDIS_URL });
-    res_client.on('error', () => { });
-    await res_client.connect();
-    const deadline = Date.now() + timeoutMs;
-    try {
-        while (Date.now() < deadline) {
-            const remaining = deadline - Date.now();
-            if (remaining <= 0) break;
-            const block = Math.min(5, Math.max(1, Math.ceil(remaining / 1000)));
-            const el = await res_client.brPop(queue, block);
-            if (!el) continue;
-            let parsed: any;
-            try {
-                parsed = JSON.parse(el.element);
-            } catch {
-                continue;
-            }
-            if (parsed?.request_id === request_id) {
-                return parsed;
-            }
-            // not belong to this — put it back at the head for another waiter
-            await res_client.lPush(queue, el.element);
-        }
-        return null;
-    } finally {
-        res_client.quit().catch(() => { });
-    }
-}
-
 async function getBestPrice(symbol: string, side: 'buy' | 'sell'): Promise<number | null> {
     try {
         const request_id = crypto.randomUUID();
+        const response_promise = waitForResponse(request_id, 8000);
         await client.lPush(
             `incoming-request`,
             JSON.stringify({
@@ -123,7 +93,7 @@ async function getBestPrice(symbol: string, side: 'buy' | 'sell'): Promise<numbe
             }),
         );
 
-        const parsed = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 8000);
+        const parsed = await response_promise;
         if (!parsed) return null;
 
         const asks: [number, number][] = parsed.asks || [];
@@ -280,6 +250,8 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         const payload: any = type == 'limit' ? { type, quantity: payload_quantity, price: payload_price, symbol, side, user_id } : { type, quantity: payload_quantity, symbol, side, user_id };
 
 
+        const response_promise = waitForResponse(request_id, 15000);
+
         await client.lPush(
             `incoming-request`,
             JSON.stringify({
@@ -293,7 +265,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const parsed_res = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 15000);
+        const parsed_res = await response_promise;
 
         if (!parsed_res) {
             return res.status(404).json({ message: "Order rejected! matching engine not processing orders", })
@@ -396,6 +368,8 @@ router.post('/api/exchange/future/order', async (req, res) => {
             payload.initial_margin = existing_position.initial_margin;
         }
 
+        const response_promise = waitForResponse(request_id, 10000);
+
         await riskEngineclient.lPush(
             `risk-engine-req-queue`,
             JSON.stringify({
@@ -409,24 +383,11 @@ router.post('/api/exchange/future/order', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        //const res_data: any = await get_identifier('response-queue', true);
+        const parsed_res = await response_promise;
 
-        console.log({
-            url: `response-queue-perp-${BACKEND_ID}`
-        });
+        console.log({ parsed_res });
 
-        const [parsed_res, parsed_risk_res] = await Promise.all([
-            waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 10000),
-            waitForResponse(`response-queue-perp-${BACKEND_ID}`, request_id, 10000),
-        ]);
-
-        console.log({ parsed_res, parsed_risk_res });
-
-        if (parsed_res) {
-            res.json({ message: 'order placed', data: parsed_res });
-        } else {
-            res.json({ message: 'order placed', data: parsed_risk_res });
-        }
+        res.json({ message: 'order placed', data: parsed_res });
 
 
 
@@ -448,6 +409,8 @@ router.get('/api/exchange/spot/order/:order_id', async (req, res) => {
 
         console.log({ order_id });
 
+        const response_promise = waitForResponse(request_id, 10000);
+
         await client.lPush(
             `incoming-request`,
             JSON.stringify({
@@ -461,7 +424,7 @@ router.get('/api/exchange/spot/order/:order_id', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const parsed_res = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 10000);
+        const parsed_res = await response_promise;
 
         if (!parsed_res) {
             return res.status(404).json({ message: 'Order not found' });
@@ -488,6 +451,8 @@ router.delete('/api/exchange/spot/order/:order_id', async (req, res) => {
 
         console.log({ order_id });
 
+        const response_promise = waitForResponse(request_id, 10000);
+
         await client.lPush(
             `incoming-request`,
             JSON.stringify({
@@ -501,7 +466,7 @@ router.delete('/api/exchange/spot/order/:order_id', async (req, res) => {
         //  wait until we got request identifier
         //return filled quantity
 
-        const parsed_res = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, 10000);
+        const parsed_res = await response_promise;
 
         if (!parsed_res) {
             return res.status(404).json({ message: 'Order not found' });
@@ -530,6 +495,8 @@ router.get('/api/exchange/depth/:symbol', async (req, res) => {
 
         console.log({ symbol, request_id });
 
+        const response_promise = waitForResponse(request_id, DEPTH_RESPONSE_TIMEOUT_MS);
+
         await client.lPush(
             `incoming-request`,
             JSON.stringify({
@@ -540,7 +507,7 @@ router.get('/api/exchange/depth/:symbol', async (req, res) => {
             }),
         );
 
-        const parsed_res = await waitForResponse(`response-queue-${BACKEND_ID}`, request_id, DEPTH_RESPONSE_TIMEOUT_MS);
+        const parsed_res = await response_promise;
         const demoDepth = buildDemoDepth(symbol);
 
         if (!parsed_res) {
@@ -580,6 +547,8 @@ router.post('/api/exchange/leverage', async (req, res) => {
 
         const request_id = crypto.randomUUID();
 
+        const response_promise = waitForResponse(request_id, 10000);
+
         await leverageClient.lPush(
             `leverage-req-queue`,
             JSON.stringify({
@@ -589,7 +558,7 @@ router.post('/api/exchange/leverage', async (req, res) => {
                 command: 'leverage-update',
             }),
         );
-        const parsed_res = await waitForResponse('leverage-res-queue', request_id, 10000);
+        const parsed_res = await response_promise;
 
         if (!parsed_res) {
             return res.status(404).json({ message: 'Leverage update not confirmed' });
