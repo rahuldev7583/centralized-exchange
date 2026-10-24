@@ -1,4 +1,5 @@
 import { createClient } from 'redis';
+import { existsSync, readFileSync } from 'node:fs';
 import { prisma } from 'database';
 import {
   MatchingEngine,
@@ -7,7 +8,6 @@ import {
   type EngineResult,
   type EngineStatus,
   type OrderInput,
-  type RequestStatus,
 } from './engine';
 
 if (!process.env.REDIS_URL) {
@@ -15,7 +15,6 @@ if (!process.env.REDIS_URL) {
 }
 
 export type engineStatus = EngineStatus;
-export type requestStatus = RequestStatus;
 export type engineResponse = EngineResponse;
 
 export type engineCommand =
@@ -33,35 +32,35 @@ export interface engineRequest {
   command: engineCommand;
 }
 
+// Request-path logging is off unless VERBOSE_LOGGING is enabled (ENGINE_CONTRACT.md §6).
+const verbose = process.env.VERBOSE_LOGGING === 'true';
+const log = (...args: unknown[]) => {
+  if (verbose) console.log(...args);
+};
+
+// Engine results carry `bigint` (integer base units); serialize them as integer strings.
+const stringify = (v: unknown): string =>
+  JSON.stringify(v, (_key, val) =>
+    typeof val === 'bigint' ? val.toString() : val,
+  );
+
 const client = createClient({ url: process.env.REDIS_URL });
-client.on('error', (err: any) =>
-  console.log({ msg: 'Redis client error', err }),
-);
+client.on('error', (err: any) => log({ msg: 'Redis client error', err }));
 
 const publishclient = createClient({ url: process.env.REDIS_URL });
-publishclient.on('error', (err: any) =>
-  console.log({ msg: 'Redis client error', err }),
-);
+publishclient.on('error', (err: any) => log({ msg: 'Redis client error', err }));
 
 const dbWorkerclient = createClient({ url: process.env.REDIS_URL });
-dbWorkerclient.on('error', (err: any) =>
-  console.log({ msg: 'Redis client error', err }),
-);
+dbWorkerclient.on('error', (err: any) => log({ msg: 'Redis client error', err }));
 
 const riskEngclient = createClient({ url: process.env.REDIS_URL });
-riskEngclient.on('error', (err: any) =>
-  console.log({ msg: 'Redis client error', err }),
-);
+riskEngclient.on('error', (err: any) => log({ msg: 'Redis client error', err }));
 
 const riskEngPubclient = createClient({ url: process.env.REDIS_URL });
-riskEngPubclient.on('error', (err: any) =>
-  console.log({ msg: 'Redis client error', err }),
-);
+riskEngPubclient.on('error', (err: any) => log({ msg: 'Redis client error', err }));
 
 const liquidationClient = createClient({ url: process.env.REDIS_URL });
-liquidationClient.on('error', (err: any) =>
-  console.log({ msg: 'Redis client error', err }),
-);
+liquidationClient.on('error', (err: any) => log({ msg: 'Redis client error', err }));
 
 //incoming-request => client => for receiving request from api to matching engine
 // response-queue-${backend_id} => publishclient => for sending matching engine response back to api
@@ -70,20 +69,52 @@ liquidationClient.on('error', (err: any) =>
 
 const engine = new MatchingEngine();
 
+// Fixture format (ENGINE_CONTRACT.md §5): {"markets":[{"symbol":"BTC_USDC"},...]}
+// `MARKETS_FIXTURE` is either inline JSON or a path to a JSON file.
+function loadFixtureSymbols(): string[] {
+  const raw = process.env.MARKETS_FIXTURE;
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    const path = raw.trim();
+    if (!existsSync(path)) return [];
+    try {
+      parsed = JSON.parse(readFileSync(path, 'utf8'));
+    } catch {
+      return [];
+    }
+  }
+  const markets = (parsed as any)?.markets;
+  if (!Array.isArray(markets)) return [];
+  return markets
+    .map((m) => (typeof m === 'string' ? m : m?.symbol))
+    .filter((s): s is string => typeof s === 'string' && s.length > 0);
+}
+
+async function loadMarketSymbols(): Promise<string[]> {
+  const fixture = loadFixtureSymbols();
+  if (fixture.length > 0) {
+    log({ msg: 'loaded markets from MARKETS_FIXTURE', symbols: fixture });
+    return fixture;
+  }
+
+  const markets = await prisma.market.findMany();
+  return markets.map((m) => m.symbol).filter((s): s is string => Boolean(s));
+}
+
 const publishResult = (result: EngineResult, backend_id: string) => {
   for (const message of result.settlement) {
-    dbWorkerclient.lPush('settlement-queue', JSON.stringify(message));
+    dbWorkerclient.lPush('settlement-queue', stringify(message));
   }
 
   for (const message of result.risk) {
-    riskEngPubclient.lPush('matching-to-risk-pub-queue', JSON.stringify(message));
+    riskEngPubclient.lPush('matching-to-risk-pub-queue', stringify(message));
   }
 
   if (result.response !== undefined && result.response !== null) {
-    publishclient.lPush(
-      `response-queue-${backend_id}`,
-      JSON.stringify(result.response),
-    );
+    publishclient.lPush(`response-queue-${backend_id}`, stringify(result.response));
   }
 };
 
@@ -131,31 +162,15 @@ await Promise.all([
   liquidationClient.connect(),
 ]);
 
+// Seed one order book per market symbol (fixture takes precedence over the DB).
+const symbols = await loadMarketSymbols();
+for (const symbol of symbols) {
+  engine.orderbook.set(symbol, { asks: new Map(), bids: new Map() });
+}
+engine_status = 'ready';
+log({ msg: 'matching engine ready', markets: symbols.length });
+
 while (1) {
-  if (engine_status == 'down') {
-    engine_status = 'pending';
-  }
-  //get the asset and markets from db, last snapshot from s3 and construct orderbook
-  //matching engine will not accept order until it create and all markets spot and perps for all asset pairs
-
-  if (engine_status != 'ready') {
-    const markets = await prisma.market.findMany();
-
-    if (!markets) {
-      //error market not intitialized
-    }
-
-    for (let i = 0; i < markets.length; i++) {
-      engine.orderbook.set(markets[i]?.symbol || 'Undefined', {
-        asks: new Map(),
-        bids: new Map(),
-      });
-    }
-
-    engine_status = 'ready';
-  }
-
-
   const req = await client.brPop(
     ['liquidation-to-matching-eng', 'incoming-request', 'risk-to-matching-eng'],
     0,
@@ -175,22 +190,6 @@ while (1) {
     }
   }
 
-  if (engine_status != 'ready' && parsed_req) {
-    const res_data: engineResponse = {
-      request_id: parsed_req.request_id,
-      status: 'order rejected',
-      message: 'Matching engine is not ready to accept orders',
-      order_id: '',
-      price: 0,
-      filled_quantity: 0,
-    };
-
-    publishclient.lPush(
-      `response-queue-${parsed_req.BACKEND_ID}`,
-      JSON.stringify(res_data),
-    );
-  }
-
   if (parsed_liquidation_req) {
     if (parsed_liquidation_req.command == 'forced-liquidate') {
       create_order(
@@ -203,56 +202,47 @@ while (1) {
 
   if (parsed_req) {
     if (parsed_req.command === 'create-order') {
-      const price = Number(parsed_req.payload.price);
-      const quantity = Number(parsed_req.payload.quantity);
-
       create_order(
-        { ...parsed_req.payload, price, quantity },
+        {
+          ...parsed_req.payload,
+          price: BigInt(parsed_req.payload.price ?? 0),
+          quantity: BigInt(parsed_req.payload.quantity),
+        },
         parsed_req.BACKEND_ID,
         parsed_req.request_id,
       );
     } else if (parsed_req.command === 'cancel-order') {
-      cancel_order(
-        parsed_req.payload,
-        parsed_req.BACKEND_ID,
-        parsed_req.request_id,
-      );
+      cancel_order(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
     } else if (parsed_req.command === 'get-order') {
       get_order(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
     } else if (parsed_req.command === 'get-balance') {
-      get_balance(
-        parsed_req.payload,
-        parsed_req.BACKEND_ID,
-        parsed_req.request_id,
-      );
+      get_balance(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
     } else if (parsed_req.command === 'get-depth') {
       get_depth(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
     } else if (parsed_req.command === 'create-asset') {
-      create_asset(
-        parsed_req.payload,
-        parsed_req.BACKEND_ID,
-        parsed_req.request_id,
-      );
+      create_asset(parsed_req.payload, parsed_req.BACKEND_ID, parsed_req.request_id);
     }
   }
 
   if (parsed_risk_req) {
     if (parsed_risk_req.command === 'create-order') {
-      const price = Number(parsed_risk_req.payload.price);
-      const quantity = Number(parsed_risk_req.payload.quantity);
-
       create_order(
-        { ...parsed_risk_req.payload, price, quantity },
+        {
+          ...parsed_risk_req.payload,
+          price: BigInt(parsed_risk_req.payload.price ?? 0),
+          quantity: BigInt(parsed_risk_req.payload.quantity),
+        },
         parsed_risk_req.BACKEND_ID,
         parsed_risk_req.request_id,
         'perp',
       );
     } else if (parsed_risk_req.command === 'close-position') {
-      const price = Number(parsed_risk_req.payload.price);
-      const quantity = Number(parsed_risk_req.payload.quantity);
-
       create_order(
-        { ...parsed_risk_req.payload, price, quantity },
+        {
+          ...parsed_risk_req.payload,
+          price: BigInt(parsed_risk_req.payload.price ?? 0),
+          quantity: BigInt(parsed_risk_req.payload.quantity),
+        },
         parsed_risk_req.BACKEND_ID,
         parsed_risk_req.request_id,
         'perp',

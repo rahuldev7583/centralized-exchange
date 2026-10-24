@@ -1,20 +1,33 @@
-
-
 export type Side = 'buy' | 'sell';
 export type OrderType = 'limit' | 'market';
-export type OrderStatus = 'filled' | 'partially_filled' | 'cancelled';
-export type RequestStatus =
-  | 'order accepted'
-  | 'order rejected'
-  | 'order pending'
-  | 'order cancelled';
+export type OrderStatus =
+  | 'accepted'
+  | 'fully_filled'
+  | 'partially_filled'
+  | 'cancelled'
+  | 'not_found'
+  | 'rejected'
+  | 'self_trade_prevented';
 export type EngineStatus = 'pending' | 'ready' | 'down';
+
+// Matching-engine contract (ENGINE_CONTRACT.md §1):
+//   price    -> whole quote units (10^0)
+//   quantity -> fixed 18-decimal base units (10^18)
+// Both are non-negative integers carried as `bigint` in-process and as integer
+// strings on the wire.
+const QUANTITY_SCALE = 10n ** 18n;
+
+// Legacy downstream channels (settlement/risk) still expect human-decimal
+// numbers; these helpers convert integer base units back for those messages
+// only. The engine's own result stays in integer base units.
+const qtyToHuman = (base: bigint): number => Number(base) / Number(QUANTITY_SCALE);
+const priceToHuman = (price: bigint): number => Number(price);
 
 export interface OpenOrder {
   order_id: string;
   side: Side;
-  price: number;
-  quantity: number;
+  price: bigint;
+  quantity: bigint;
   user_id: string;
   request_id: string;
   type: OrderType;
@@ -24,9 +37,9 @@ export interface OpenOrder {
 
 export interface Fill {
   type: OrderType;
-  quantity: number;
-  filled_quantity: number;
-  price: number;
+  quantity: bigint;
+  filled_quantity: bigint;
+  price: bigint;
   symbol: string;
   buy_user_id: string;
   sell_user_id: string;
@@ -40,8 +53,8 @@ export interface Fill {
 export interface Order {
   order_id: string;
   side: Side;
-  price: number;
-  quantity: number;
+  price: bigint;
+  quantity: bigint;
   user_id: string;
   request_id: string;
   type: OrderType;
@@ -70,29 +83,27 @@ export interface OrderInput {
   symbol: string;
   type: OrderType;
   side: Side;
-  price: number;
-  quantity: number;
+  price: bigint;
+  quantity: bigint;
   user_id: string;
 }
 
 export interface EngineResponse {
   request_id: string;
   order_id: string;
-  status: RequestStatus;
+  status: OrderStatus;
   message: string;
-  price: number;
-  filled_quantity: number;
+  price: bigint;
+  filled_quantity: bigint;
+  remaining_quantity: bigint;
   data?: unknown;
+  fills: Fill[];
 }
 
 export interface EngineResult {
-
   response: unknown;
-
   fills: Fill[];
-
   settlement: unknown[];
-
   risk: unknown[];
 }
 
@@ -114,6 +125,40 @@ export class MatchingEngine {
 
   constructor(private readonly generateId: IdGenerator = defaultId) { }
 
+  // Resting orders on the counterparty side, best price first, FIFO within a
+  // price level. For a buy taker we sweep asks (lowest first); for a sell
+  // taker we sweep bids (highest first).
+  private restingOrders(book: Orderbook, side: Side): OpenOrder[] {
+    const map = side === 'buy' ? book.asks : book.bids;
+    const list = [...map.values()];
+    list.sort((a, b) => {
+      const pc =
+        side === 'buy'
+          ? a.price < b.price
+            ? -1
+            : a.price > b.price
+              ? 1
+              : 0
+          : a.price < b.price
+            ? 1
+            : a.price > b.price
+              ? -1
+              : 0;
+      if (pc !== 0) return pc;
+      return a.created_at - b.created_at;
+    });
+    return list;
+  }
+
+  private consume(book: Orderbook, side: Side, order: OpenOrder, take: bigint) {
+    const map = side === 'buy' ? book.asks : book.bids;
+    if (take >= order.quantity) {
+      map.delete(order.order_id);
+    } else {
+      map.set(order.order_id, { ...order, quantity: order.quantity - take });
+    }
+  }
+
   createOrder(
     payload: OrderInput,
     request_id: string,
@@ -121,17 +166,30 @@ export class MatchingEngine {
   ): EngineResult {
     const { request_type, command } = options;
     const order_id = this.generateId();
+    const quantity = payload.quantity;
+    const price = payload.type === 'market' ? 0n : payload.price;
     const market = this.orderbook.get(payload.symbol);
 
     const fills: Fill[] = [];
     const settlement: unknown[] = [];
     const risk: unknown[] = [];
 
-    const makeOrder = (quantity: number): OpenOrder => ({
+    const humanPayload = () => {
+      const base = {
+        type: payload.type,
+        quantity: qtyToHuman(quantity),
+        symbol: payload.symbol,
+        side: payload.side,
+        user_id: payload.user_id,
+      };
+      return payload.type === 'limit' ? { ...base, price: priceToHuman(price) } : base;
+    };
+
+    const makeOrder = (qty: bigint): OpenOrder => ({
       order_id,
       side: payload.side,
-      price: payload.price,
-      quantity,
+      price,
+      quantity: qty,
       user_id: payload.user_id,
       request_id,
       type: payload.type,
@@ -140,17 +198,17 @@ export class MatchingEngine {
     });
 
     const makeFill = (
-      filled_quantity: number,
-      price: number,
+      filled_quantity: bigint,
+      fill_price: bigint,
       buy_user_id: string,
       sell_user_id: string,
       buy_order_id: string,
       sell_order_id: string,
     ): Fill => ({
       type: payload.type,
-      quantity: payload.quantity,
+      quantity,
       filled_quantity,
-      price,
+      price: fill_price,
       symbol: payload.symbol,
       buy_user_id,
       sell_user_id,
@@ -161,559 +219,124 @@ export class MatchingEngine {
       order_type: payload.side,
     });
 
+    const humanFill = (f: Fill) => ({
+      type: f.type,
+      quantity: qtyToHuman(f.quantity),
+      filled_quantity: qtyToHuman(f.filled_quantity),
+      price: priceToHuman(f.price),
+      symbol: f.symbol,
+      buy_user_id: f.buy_user_id,
+      sell_user_id: f.sell_user_id,
+      buy_order_id: f.buy_order_id,
+      sell_order_id: f.sell_order_id,
+      fill_id: f.fill_id,
+      created_at: f.created_at,
+      order_type: f.order_type,
+    });
+
     const recordFill = (fill: Fill): void => {
       fills.push(fill);
       settlement.push({
-        fill,
-        payload,
+        fill: humanFill(fill),
+        payload: humanPayload(),
         request_type,
         order_id,
         command: command || 'create-fill',
       });
-      risk.push({ fill, command: 'fill-order' });
+      risk.push({ fill: humanFill(fill), command: 'fill-order' });
     };
 
     if (!market) {
-      const res_data: EngineResponse = {
-        request_id,
-        order_id,
-        status: 'order rejected',
-        message: 'Market not available on orderbook',
-        price: payload.price,
-        filled_quantity: 0,
+      return {
+        response: {
+          request_id,
+          order_id,
+          status: 'rejected',
+          message: 'Market not available on orderbook',
+          price,
+          filled_quantity: 0n,
+          remaining_quantity: quantity,
+          fills,
+        },
+        fills,
+        settlement,
+        risk,
       };
-      return { response: res_data, fills, settlement, risk };
     }
 
-    if (payload.type === 'market') {
-      if (payload.side === 'buy') {
-        let lowest_price = 0;
-        let lowest_order = '';
-        let notional_sum = 0;
+    let filled = 0n;
+    const isMarket = payload.type === 'market';
+    const resting = this.restingOrders(market, payload.side);
 
-        if (market.asks.size > 0) {
-          for (const [key, value] of market.asks.entries()) {
-            if (lowest_price === 0 && value.user_id !== payload.user_id) {
-              lowest_price = value.price;
-              lowest_order = key;
-            } else if (
-              value.price <= lowest_price &&
-              value.user_id !== payload.user_id
-            ) {
-              lowest_price = value.price;
-              lowest_order = key;
-            }
-          }
-        }
-
-        let filled_quantity = 0;
-
-        market.asks.forEach((k, v) => {
-          if (k.price <= lowest_price && k.user_id !== payload.user_id) {
-            lowest_price = k.price;
-            lowest_order = v;
-
-            if (filled_quantity < payload.quantity) {
-              if (k.quantity > payload.quantity - filled_quantity) {
-                const current_ast = market.asks.get(v)!;
-                const delta_qty = payload.quantity - filled_quantity;
-                notional_sum += lowest_price * delta_qty;
-
-                const fill = makeFill(
-                  delta_qty,
-                  lowest_price,
-                  payload.user_id,
-                  current_ast.user_id,
-                  order_id,
-                  current_ast.order_id,
-                );
-                filled_quantity += delta_qty;
-                recordFill(fill);
-
-                market.asks.set(v, {
-                  ...k,
-                  quantity: k.quantity - delta_qty,
-                });
-              } else if (k.quantity <= payload.quantity - filled_quantity) {
-                const current_ast = market.asks.get(v)!;
-                filled_quantity += current_ast.quantity;
-
-                const fill = makeFill(
-                  current_ast.quantity,
-                  lowest_price,
-                  payload.user_id,
-                  current_ast.user_id,
-                  order_id,
-                  current_ast.order_id,
-                );
-                recordFill(fill);
-                notional_sum += lowest_price * current_ast.quantity;
-
-                market.asks.delete(v);
-              }
-            }
-          } else {
-            let second_lowest_price = 0;
-            let second_lowest_id = '';
-
-            if (market.asks.size > 0) {
-              for (const [key, value] of market.asks.entries()) {
-                if (
-                  second_lowest_price === 0 &&
-                  value.user_id !== payload.user_id
-                ) {
-                  second_lowest_price = value.price;
-                  second_lowest_id = key;
-                } else if (
-                  value.price <= second_lowest_price &&
-                  value.price > lowest_price &&
-                  value.user_id !== payload.user_id
-                ) {
-                  second_lowest_price = value.price;
-                  second_lowest_id = key;
-                }
-              }
-            }
-
-            lowest_order = second_lowest_id;
-            lowest_price = second_lowest_price;
-          }
-        });
-
-        const avg_price =
-          filled_quantity > 0 ? notional_sum / filled_quantity : lowest_price || 0;
-
-        const res_data: EngineResponse = {
-          request_id,
-          order_id,
-          price: avg_price,
-          filled_quantity,
-          status: 'order accepted',
-          message: 'Order got filled',
-        };
-        return { response: res_data, fills, settlement, risk };
-      } else if (payload.side === 'sell') {
-        let highest_price = 0;
-        let highest_order = '';
-        let notional_sum = 0;
-
-        if (market.bids.size > 0) {
-          for (const [key, value] of market.bids.entries()) {
-            if (highest_price === 0 && value.user_id !== payload.user_id) {
-              highest_price = value.price;
-              highest_order = key;
-            } else if (
-              value.price >= highest_price &&
-              value.user_id !== payload.user_id
-            ) {
-              highest_price = value.price;
-              highest_order = key;
-            }
-          }
-        }
-
-        let filled_quantity = 0;
-
-        market.bids.forEach((k, v) => {
-          if (k.price >= highest_price && k.user_id !== payload.user_id) {
-            highest_price = k.price;
-            highest_order = v;
-
-            if (filled_quantity < payload.quantity) {
-              if (k.quantity > payload.quantity - filled_quantity) {
-                const current_ast = market.bids.get(v)!;
-                const delta_qty = payload.quantity - filled_quantity;
-                filled_quantity += delta_qty;
-
-                const fill = makeFill(
-                  delta_qty,
-                  highest_price,
-                  current_ast.user_id,
-                  payload.user_id,
-                  current_ast.order_id,
-                  order_id,
-                );
-                recordFill(fill);
-                notional_sum += highest_price * delta_qty;
-
-                market.bids.set(v, {
-                  ...k,
-                  quantity: k.quantity - delta_qty,
-                });
-              } else if (k.quantity <= payload.quantity - filled_quantity) {
-                const current_ast = market.bids.get(v)!;
-                filled_quantity += current_ast.quantity;
-
-                const fill = makeFill(
-                  current_ast.quantity,
-                  highest_price,
-                  current_ast.user_id,
-                  payload.user_id,
-                  current_ast.order_id,
-                  order_id,
-                );
-                recordFill(fill);
-                notional_sum += highest_price * current_ast.quantity;
-
-                market.bids.delete(v);
-              }
-            }
-          } else {
-            let second_highest_price = 0;
-            let second_highest_id = '';
-
-            if (market.bids.size > 0) {
-              for (const [key, value] of market.bids.entries()) {
-                if (
-                  second_highest_price === 0 &&
-                  value.user_id !== payload.user_id
-                ) {
-                  second_highest_price = value.price;
-                  second_highest_id = key;
-                } else if (
-                  value.price >= second_highest_price &&
-                  value.price < highest_price &&
-                  value.user_id !== payload.user_id
-                ) {
-                  second_highest_price = value.price;
-                  second_highest_id = key;
-                }
-              }
-            }
-
-            highest_order = second_highest_id;
-            highest_price = second_highest_price;
-          }
-        });
-
-        const avg_price =
-          filled_quantity > 0 ? notional_sum / filled_quantity : highest_price || 0;
-
-        const res_data: EngineResponse = {
-          request_id,
-          order_id,
-          price: avg_price,
-          filled_quantity,
-          status: 'order accepted',
-          message: 'Order got filled',
-        };
-        return { response: res_data, fills, settlement, risk };
+    for (const o of resting) {
+      if (o.user_id === payload.user_id) continue; // self-trade skip
+      if (!isMarket) {
+        const crosses =
+          payload.side === 'buy' ? o.price <= price : o.price >= price;
+        if (!crosses) break;
       }
-    } else {
-      if (payload.side === 'buy') {
-        let lowest_price = 0;
-        let lowest_order = '';
+      if (filled >= quantity) break;
 
-        if (market.asks.size > 0) {
-          for (const [key, value] of market.asks.entries()) {
-            if (lowest_price === 0 && value.user_id !== payload.user_id) {
-              lowest_price = value.price;
-              lowest_order = key;
-            } else if (
-              value.price <= lowest_price &&
-              value.user_id !== payload.user_id
-            ) {
-              lowest_price = value.price;
-              lowest_order = key;
-            }
-          }
-        }
+      const take = o.quantity < quantity - filled ? o.quantity : quantity - filled;
+      if (take <= 0n) break;
 
-        if (
-          market.asks.size === 0 ||
-          (market.asks.size > 0 && payload.price < lowest_price)
-        ) {
-          const order = makeOrder(payload.quantity);
-          market.bids.set(order_id, order);
-
-          risk.push({ order, command: 'create-order' });
-
-          const res_data: EngineResponse = {
-            request_id,
-            order_id,
-            price: payload.price,
-            filled_quantity: 0,
-            status: 'order accepted',
-            message: 'Sitting on orderbook',
-          };
-
-          settlement.push({ ...res_data, payload, command: 'create-order' });
-
-          return { response: res_data, fills, settlement, risk };
-        } else {
-          let total_quantity = 0;
-          const matching_orders: string[] = [];
-
-          market.asks.forEach((k, v) => {
-            if (k.price <= payload.price && k.user_id !== payload.user_id) {
-              if (payload.quantity > total_quantity) {
-                total_quantity += k.quantity;
-                matching_orders.push(v);
-              }
-            }
-          });
-
-          if (total_quantity >= payload.quantity) {
-            let filled_quantity = 0;
-
-            for (let i = 0; i < matching_orders.length; i++) {
-              const orderKey = matching_orders[i]!;
-              const current_ast = market.asks.get(orderKey)!;
-
-              if (current_ast.quantity > payload.quantity - filled_quantity) {
-                filled_quantity = payload.quantity;
-
-                const fill = makeFill(
-                  payload.quantity,
-                  payload.price,
-                  payload.user_id,
-                  current_ast.user_id,
-                  order_id,
-                  current_ast.order_id,
-                );
-                recordFill(fill);
-
-                market.asks.set(orderKey, {
-                  ...current_ast,
-                  quantity:
-                    current_ast.quantity -
-                    (payload.quantity - filled_quantity),
-                });
-              } else if (
-                current_ast.quantity <=
-                payload.quantity - filled_quantity
-              ) {
-                filled_quantity += current_ast.quantity;
-
-                const fill = makeFill(
-                  current_ast.quantity,
-                  payload.price,
-                  payload.user_id,
-                  current_ast.user_id,
-                  order_id,
-                  current_ast.order_id,
-                );
-                recordFill(fill);
-
-                market.asks.delete(orderKey);
-              }
-            }
-
-            const res_data: EngineResponse = {
-              request_id,
-              order_id,
-              price: payload.price,
-              filled_quantity,
-              status: 'order accepted',
-              message: 'Order got filled',
-            };
-            return { response: res_data, fills, settlement, risk };
-          } else {
-            let filled_quantity = 0;
-
-            for (let i = 0; i < matching_orders.length; i++) {
-              const orderKey = matching_orders[i]!;
-              const current_ast = market.asks.get(orderKey)!;
-
-              if (current_ast.quantity > payload.quantity - filled_quantity) {
-                market.asks.set(orderKey, {
-                  ...current_ast,
-                  quantity:
-                    current_ast.quantity -
-                    (payload.quantity - filled_quantity),
-                });
-                filled_quantity = payload.quantity;
-              } else if (
-                current_ast.quantity <=
-                payload.quantity - filled_quantity
-              ) {
-                filled_quantity += current_ast.quantity;
-
-                const fill = makeFill(
-                  current_ast.quantity,
-                  payload.price,
-                  payload.user_id,
-                  current_ast.user_id,
-                  order_id,
-                  current_ast.order_id,
-                );
-                recordFill(fill);
-
-                market.asks.delete(orderKey);
-              }
-            }
-
-            market.bids.set(order_id, makeOrder(payload.quantity - filled_quantity));
-
-            const res_data: EngineResponse = {
-              request_id,
-              order_id,
-              price: payload.price,
-              filled_quantity,
-              status: 'order accepted',
-              message: 'Order is partially filled',
-            };
-            return { response: res_data, fills, settlement, risk };
-          }
-        }
-      } else if (payload.side === 'sell') {
-        let highest_price = 0;
-        let highest_order = '';
-
-        if (market.bids.size > 0) {
-          for (const [key, value] of market.bids.entries()) {
-            if (highest_price === 0 && value.user_id !== payload.user_id) {
-              highest_price = value.price;
-              highest_order = key;
-            } else if (
-              value.price <= highest_price &&
-              value.user_id !== payload.user_id
-            ) {
-              highest_price = value.price;
-              highest_order = key;
-            }
-          }
-        }
-
-        if (
-          market.bids.size === 0 ||
-          (market.bids.size > 0 && payload.price > highest_price)
-        ) {
-          const order = makeOrder(payload.quantity);
-          market.asks.set(order_id, order);
-
-          risk.push({ order, command: 'create-order' });
-
-          const res_data: EngineResponse = {
-            request_id,
-            order_id,
-            price: payload.price,
-            filled_quantity: 0,
-            status: 'order accepted',
-            message: 'Sitting on orderbook',
-          };
-
-          settlement.push({ ...res_data, payload, command: 'create-order' });
-
-          return { response: res_data, fills, settlement, risk };
-        } else {
-          let total_quantity = 0;
-          const matching_orders: string[] = [];
-
-          market.bids.forEach((k, v) => {
-            if (k.price >= payload.price && k.user_id !== payload.user_id) {
-              if (payload.quantity > total_quantity) {
-                total_quantity += k.quantity;
-                matching_orders.push(v);
-              }
-            }
-          });
-
-          if (total_quantity >= payload.quantity) {
-            let filled_quantity = 0;
-
-            for (let i = 0; i < matching_orders.length; i++) {
-              const orderKey = matching_orders[i]!;
-              const current_ast = market.bids.get(orderKey)!;
-
-              if (current_ast.quantity > payload.quantity - filled_quantity) {
-                market.bids.set(orderKey, {
-                  ...current_ast,
-                  quantity:
-                    current_ast.quantity -
-                    (payload.quantity - filled_quantity),
-                });
-                filled_quantity = payload.quantity;
-              } else if (
-                current_ast.quantity <=
-                payload.quantity - filled_quantity
-              ) {
-                filled_quantity += current_ast.quantity;
-
-                const fill = makeFill(
-                  current_ast.quantity,
-                  payload.price,
-                  current_ast.user_id,
-                  payload.user_id,
-                  current_ast.order_id,
-                  order_id,
-                );
-                recordFill(fill);
-
-                market.bids.delete(orderKey);
-              }
-            }
-
-            const res_data: EngineResponse = {
-              request_id,
-              order_id,
-              price: payload.price,
-              filled_quantity,
-              status: 'order accepted',
-              message: 'Order got filled',
-            };
-            return { response: res_data, fills, settlement, risk };
-          } else {
-            let filled_quantity = 0;
-
-            for (let i = 0; i < matching_orders.length; i++) {
-              const orderKey = matching_orders[i]!;
-              const current_ast = market.bids.get(orderKey)!;
-
-              if (current_ast.quantity > payload.quantity - filled_quantity) {
-                market.bids.set(orderKey, {
-                  ...current_ast,
-                  quantity:
-                    current_ast.quantity -
-                    (payload.quantity - filled_quantity),
-                });
-                filled_quantity = payload.quantity;
-              } else if (
-                current_ast.quantity <=
-                payload.quantity - filled_quantity
-              ) {
-                filled_quantity += current_ast.quantity;
-
-                const fill = makeFill(
-                  current_ast.quantity,
-                  payload.price,
-                  current_ast.user_id,
-                  payload.user_id,
-                  current_ast.order_id,
-                  order_id,
-                );
-                recordFill(fill);
-
-                market.bids.delete(orderKey);
-              }
-            }
-
-            market.asks.set(order_id, makeOrder(payload.quantity - filled_quantity));
-
-            const res_data: EngineResponse = {
-              request_id,
-              order_id,
-              price: payload.price,
-              filled_quantity,
-              status: 'order accepted',
-              message: 'Order got partially filled',
-            };
-            return { response: res_data, fills, settlement, risk };
-          }
-        }
-      }
+      const fill =
+        payload.side === 'buy'
+          ? makeFill(take, o.price, payload.user_id, o.user_id, order_id, o.order_id)
+          : makeFill(take, o.price, o.user_id, payload.user_id, o.order_id, order_id);
+      recordFill(fill);
+      filled += take;
+      this.consume(market, payload.side, o, take);
     }
 
-    // Unreachable for valid inputs; kept to satisfy exhaustive return.
+    // Limit order with remaining quantity rests on the book.
+    if (!isMarket && filled < quantity) {
+      const restingOrder = makeOrder(quantity - filled);
+      market[payload.side === 'buy' ? 'bids' : 'asks'].set(order_id, restingOrder);
+      risk.push({
+        order: {
+          ...restingOrder,
+          price: priceToHuman(restingOrder.price),
+          quantity: qtyToHuman(restingOrder.quantity),
+        },
+        command: 'create-order',
+      });
+      settlement.push({
+        ...humanPayload(),
+        payload: humanPayload(),
+        command: 'create-order',
+        order_id,
+        request_id,
+      });
+    }
+
+    const status: OrderStatus =
+      filled === 0n
+        ? isMarket
+          ? 'rejected'
+          : 'accepted'
+        : filled === quantity
+          ? 'fully_filled'
+          : 'partially_filled';
+
+    // Average execution price (integer division) for market orders, the limit
+    // price otherwise — both in whole units.
+    const avgPrice =
+      isMarket && filled > 0n
+        ? fills.reduce((s, f) => s + f.price * f.filled_quantity, 0n) / filled
+        : price;
+
     return {
       response: {
         request_id,
         order_id,
-        status: 'order rejected',
-        message: 'Unknown order type',
-        price: payload.price,
-        filled_quantity: 0,
-      } satisfies EngineResponse,
+        status,
+        price: avgPrice,
+        filled_quantity: filled,
+        remaining_quantity: quantity - filled,
+        message: status === 'fully_filled' ? 'Order got filled' : status === 'partially_filled' ? 'Order partially filled' : status === 'rejected' ? 'Order rejected' : 'Sitting on orderbook',
+        fills,
+      },
       fills,
       settlement,
       risk,
@@ -725,115 +348,139 @@ export class MatchingEngine {
     const settlement: unknown[] = [];
     const risk: unknown[] = [];
 
-    let order: any;
-    this.orderbook.forEach((book, symbol) => {
+    let order: OpenOrder | undefined;
+    this.orderbook.forEach((book) => {
       book.asks.forEach((o, key) => {
-        if (o.order_id == orderId) {
+        if (o.order_id === orderId) {
           order = o;
-          this.orderbook.get(symbol)?.asks.delete(key);
+          book.asks.delete(key);
         }
       });
       book.bids.forEach((o, key) => {
-        if (o.order_id == orderId) {
+        if (o.order_id === orderId) {
           order = o;
-          this.orderbook.get(symbol)?.bids.delete(key);
+          book.bids.delete(key);
         }
       });
     });
 
     if (!order) {
-      const res_data: EngineResponse = {
-        request_id,
-        order_id: '',
-        filled_quantity: 0,
-        price: (orderId as any).price,
-        status: 'order pending',
-        message: 'order not found',
+      return {
+        response: {
+          request_id,
+          order_id: '',
+          filled_quantity: 0n,
+          remaining_quantity: 0n,
+          price: 0n,
+          status: 'not_found',
+          message: 'Order not found',
+          fills,
+        },
+        fills,
+        settlement,
+        risk,
       };
-      return { response: res_data, fills, settlement, risk };
     }
 
-    const res_data: EngineResponse = {
-      request_id,
-      order_id: order.id,
-      price: (orderId as any).price,
-      data: order,
-      filled_quantity: 0,
-      status: 'order cancelled',
-      message: '',
-    };
-
-    risk.push({ order, command: 'cancel-order' });
+    risk.push({
+      order: {
+        ...order,
+        price: priceToHuman(order.price),
+        quantity: qtyToHuman(order.quantity),
+      },
+      command: 'cancel-order',
+    });
 
     settlement.push({
+      ...order,
       request_id,
       filled_quantity: 0,
       message: '',
-      ...order,
+      price: priceToHuman(order.price),
+      quantity: qtyToHuman(order.quantity),
       fill: {},
       payload: { symbol: order.symbol },
       command: 'cancel-order',
     });
 
-    return { response: res_data, fills, settlement, risk };
+    return {
+      response: {
+        request_id,
+        order_id: order.order_id,
+        price: order.price,
+        data: order,
+        filled_quantity: 0n,
+        remaining_quantity: order.quantity,
+        status: 'cancelled',
+        message: 'Order cancelled',
+        fills,
+      },
+      fills,
+      settlement,
+      risk,
+    };
   }
 
   getOrder(orderId: string, request_id: string): EngineResult {
     let order: OpenOrder | undefined;
     this.orderbook.forEach((book) => {
       book.asks.forEach((o) => {
-        if (o.order_id == orderId) {
-          order = o;
-        }
+        if (o.order_id === orderId) order = o;
       });
       book.bids.forEach((o) => {
-        if (o.order_id == orderId) {
-          order = o;
-        }
+        if (o.order_id === orderId) order = o;
       });
     });
 
-    const res_data: EngineResponse = {
-      request_id,
-      data: order,
-      status: 'order pending',
-      message: 'Order is Sitting on orderbook',
-      order_id: '',
-      price: 0,
-      filled_quantity: 0,
+    return {
+      response: {
+        request_id,
+        data: order,
+        status: order ? 'accepted' : 'not_found',
+        message: order ? 'Order is sitting on orderbook' : 'Order not found',
+        order_id: order ? order.order_id : '',
+        price: order ? order.price : 0n,
+        filled_quantity: 0n,
+        remaining_quantity: order ? order.quantity : 0n,
+        fills: [],
+      },
+      fills: [],
+      settlement: [],
+      risk: [],
     };
-
-    return { response: res_data, fills: [], settlement: [], risk: [] };
   }
 
   getBalance(_payload: unknown, _request_id: string): EngineResult {
-    // TODO: return user assets by user id.
     return { response: undefined, fills: [], settlement: [], risk: [] };
   }
 
   getDepth(symbol: string, request_id: string): EngineResult {
     const market = this.orderbook.get(symbol);
 
-    const asks: [number, number][] = [];
-    const bids: [number, number][] = [];
+    const asks: [string, string][] = [];
+    const bids: [string, string][] = [];
 
     if (market) {
-      const agg_asks: Record<string, number> = {};
+      const agg_asks = new Map<string, bigint>();
       market.asks.forEach((v) => {
         const key = String(v.price);
-        agg_asks[key] = (agg_asks[key] || 0) + v.quantity;
+        agg_asks.set(key, (agg_asks.get(key) ?? 0n) + v.quantity);
       });
-      for (const [price, size] of Object.entries(agg_asks)) {
-        asks.push([Number(price), size]);
+      for (const [price, size] of [...agg_asks.entries()].sort(
+        (a, b) => Number(BigInt(a[0]) - BigInt(b[0])),
+      )) {
+        asks.push([price, size.toString()]);
       }
 
-      const agg_bids: Record<string, number> = {};
+      const agg_bids = new Map<string, bigint>();
       market.bids.forEach((v) => {
         const key = String(v.price);
-        agg_bids[key] = (agg_bids[key] || 0) + v.quantity;
+        agg_bids.set(key, (agg_bids.get(key) ?? 0n) + v.quantity);
       });
-      for (const [price, size] of Object.entries(agg_bids)) {
-        bids.push([Number(price), size]);
+      for (const [price, size] of [...agg_bids.entries()].sort(
+        (a, b) => Number(BigInt(b[0]) - BigInt(a[0])),
+      )) {
+        bids.push([price, size.toString()]);
       }
     }
 
@@ -863,10 +510,7 @@ export class MatchingEngine {
     }
 
     this.assets.push(payload);
-    this.orderbook.set(payload.symbol, {
-      asks: new Map(),
-      bids: new Map(),
-    });
+    this.orderbook.set(payload.symbol, { asks: new Map(), bids: new Map() });
 
     return {
       response: { request_id, ASSETS: this.assets, ORDERBOOK: this.orderbook },

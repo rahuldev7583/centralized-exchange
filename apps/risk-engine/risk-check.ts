@@ -2,6 +2,7 @@ import { createClient } from 'redis';
 import { LEVERAGES, PRICES, ASSETS, BALANCES } from "./shared-state";
 import { Decimal } from "database/generated/prisma/internal/prismaNamespace";
 import { prisma } from 'database';
+import { toPriceUnits, toQuantityUnits } from 'shared-types';
 
 if (!process.env.REDIS_URL) {
   throw new Error('REDIS_URL is not set');
@@ -144,8 +145,12 @@ export const risk_check_service = async () => {
 
           console.log({ initial_margin });
 
+          // Matching-engine contract (§1): forward integer base units to the
+          // matching engine. Margin math above stays on human decimals.
           const payload = {
             ...parsed_req.payload,
+            quantity: toQuantityUnits(parsed_req.payload.quantity),
+            price: toPriceUnits(parsed_req.payload.price ?? 0),
             initial_margin: initial_margin
           };
 
@@ -220,10 +225,15 @@ export const risk_check_service = async () => {
 
           console.log("Risk engine approved closing order, move to matching engine");
 
+          // Forward integer base units to the matching engine (§1).
           await matchineEngClient.lPush("risk-to-matching-eng", JSON.stringify({
             BACKEND_ID: parsed_req.BACKEND_ID,
             request_id: parsed_req.request_id,
-            payload: parsed_req.payload,
+            payload: {
+              ...parsed_req.payload,
+              quantity: toQuantityUnits(parsed_req.payload.quantity),
+              price: toPriceUnits(parsed_req.payload.price ?? 0),
+            },
             command: 'close-position',
           }))
 

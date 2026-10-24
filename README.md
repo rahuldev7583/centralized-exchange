@@ -346,6 +346,24 @@ Redis is the message bus between API, matching, risk, oracle, and persistence se
 | `liquidation-to-matching-eng`      | List   | `risk-engine`     | `matching-engine`          | Liquidation orders.                                |
 | `index-prices:events`              | Stream | `oracle-service`  | `db-worker`, `risk-engine` | External index price events.                       |
 
+## Matching Engine Contract
+
+The TypeScript (`apps/matching-engine`) and Rust (`matching-engine-rust`) engines
+share a single boundary contract defined in
+[`ENGINE_CONTRACT.md`](./ENGINE_CONTRACT.md). Highlights:
+
+- Prices are whole quote units; quantities are fixed 18-decimal base units.
+  Both are non-negative integers serialized as strings on the wire (never floats).
+- A single normalized status enum and a result shape of `status`,
+  `filled_quantity`, `remaining_quantity`, and a complete `fills` array.
+- Responses go to `response-queue-{backend_id}`; queues are popped
+  liquidation-first; publishing is fire-and-forget.
+- Startup supports a `MARKETS_FIXTURE` fixture (shared by both engines).
+- Request-path logging is disabled unless `VERBOSE_LOGGING=true`.
+
+The backend (`core-backend`) scales decimal price/quantity into these integer
+base units before publishing to the engine.
+
 ## Common Commands
 
 ```bash

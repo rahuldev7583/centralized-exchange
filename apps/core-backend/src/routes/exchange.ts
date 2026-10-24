@@ -2,7 +2,7 @@ import express from 'express';
 import { BACKEND_ID, client, riskEngineclient, leverageClient, waitForResponse } from '..';
 import { find_asset, find_market, get_balance } from '../middleware/exchange';
 import { Prisma, prisma } from 'database';
-import { scaledDecimal } from 'shared-types';
+import { scaledDecimal, toPriceUnits, toQuantityUnits } from 'shared-types';
 import { Order } from '../types/user';
 import { ZodError } from 'zod';
 
@@ -13,6 +13,12 @@ if (!process.env.REDIS_URL) {
 const router = express();
 const DEPTH_RESPONSE_TIMEOUT_MS = Number(process.env.DEPTH_RESPONSE_TIMEOUT_MS || 1200);
 const DEMO_MARKET_DATA_ENABLED = (process.env.DEMO_MARKET_DATA_ENABLED || 'true').toLowerCase() !== 'false';
+
+// Request-path logging is off unless VERBOSE_LOGGING is enabled (ENGINE_CONTRACT.md §6).
+const VERBOSE_LOGGING = process.env.VERBOSE_LOGGING === 'true';
+const log = (...args: unknown[]) => {
+    if (VERBOSE_LOGGING) console.log(...args);
+};
 
 const DEMO_MARKETS: Record<string, { price: number; qty: number; step: number }> = {
     BTC: { price: 65000, qty: 0.018, step: 18 },
@@ -120,22 +126,22 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         const req_body = req.body;
         const { type, side, quantity, price, symbol } = Order.parse(req_body);
 
-        console.log({ symbol });
+        log({ symbol });
         const start_time = Date.now();
 
         const user_id = req.user;
-        console.log({ user_id });
+        log({ user_id });
 
         const mkt = await find_market(symbol);
 
-        console.log({ mkt });
+        log({ mkt });
 
         if (!mkt) {
             return res.status(404).json({ message: "Marekt not available" })
         }
 
         const asts = symbol.split(/_/);
-        console.log({ asts });
+        log({ asts });
 
         const base_ast = await find_asset(asts[0]);
         const quote_ast = await find_asset(asts[1]);
@@ -146,7 +152,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         const base_bal = await get_balance(user_id, asts[0]);
         const quote_bal = await get_balance(user_id, asts[1]);
 
-        console.log({ quote_bal, base_bal });
+        log({ quote_bal, base_bal });
 
         if (!quote_bal || !base_bal) {
             return res.status(404).json({ message: "Not have valid wallet! Please fund you wallet" })
@@ -172,7 +178,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         //for buy, check the currency balance, for sell check the asset balance
         //for buy lock the currency, for sell lock the asset
 
-        console.log({ base_ast, quote_ast });
+        log({ base_ast, quote_ast });
 
         const user_base_ast = await prisma.asset_balance.findFirst({
             where: {
@@ -232,7 +238,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
 
         const request_id = crypto.randomUUID();
 
-        console.log({ request_id });
+        log({ request_id });
 
 
         // Every message sent from the backend to the engine includes:
@@ -244,8 +250,10 @@ router.post('/api/exchange/spot/order', async (req, res) => {
 
         //The engine must reply to message.responseQueue and include the same correlationId.
 
-        const payload_price = new Prisma.Decimal(price || 0);
-        const payload_quantity = new Prisma.Decimal(quantity);
+        // Matching-engine contract (§1): integer base units. Price = whole
+        // units; quantity = 18-decimal base units. Both serialize as strings.
+        const payload_price = toPriceUnits(price || 0);
+        const payload_quantity = toQuantityUnits(quantity);
 
         const payload: any = type == 'limit' ? { type, quantity: payload_quantity, price: payload_price, symbol, side, user_id } : { type, quantity: payload_quantity, symbol, side, user_id };
 
@@ -271,7 +279,7 @@ router.post('/api/exchange/spot/order', async (req, res) => {
             return res.status(404).json({ message: "Order rejected! matching engine not processing orders", })
         }
 
-        console.log({ parsed_res });
+        log({ parsed_res });
 
         const end_time = Date.now();
 
@@ -281,8 +289,8 @@ router.post('/api/exchange/spot/order', async (req, res) => {
         const res_time = end_time - start_time;
         res.json({ message: parsed_res.status, data: parsed_res, respnose_time: res_time });
     } catch (error) {
-        console.log({ error });
-        console.log({ error });
+        log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -297,22 +305,22 @@ router.post('/api/exchange/future/order', async (req, res) => {
         const req_body = req.body;
         const { type, side, quantity, price, symbol } = Order.parse(req_body);
 
-        console.log({ symbol });
+        log({ symbol });
         const start_time = Date.now();
 
         const user_id = req.user;
-        console.log({ user_id });
+        log({ user_id });
 
         const mkt = await find_market(symbol);
 
-        console.log({ mkt });
+        log({ mkt });
 
         if (!mkt) {
             return res.status(404).json({ message: "Market not available" })
         }
 
         const asts = symbol.split(/_/);
-        console.log({ asts });
+        log({ asts });
 
         const base_ast = await find_asset(asts[0]);
         const quote_ast = await find_asset(asts[1]);
@@ -330,7 +338,7 @@ router.post('/api/exchange/future/order', async (req, res) => {
         //for buy lock the currency, for sell lock the asset
 
 
-        console.log({ base_ast, quote_ast });
+        log({ base_ast, quote_ast });
 
         //closing an existing perp position => opposing order reduces active position, no new margin locked
         const existing_position = await prisma.position.findFirst({
@@ -340,7 +348,7 @@ router.post('/api/exchange/future/order', async (req, res) => {
             }
         });
 
-        console.log({ existing_position });
+        log({ existing_position });
 
         const is_closing = existing_position && (
             (existing_position.side == 'long' && side == 'sell') ||
@@ -351,7 +359,7 @@ router.post('/api/exchange/future/order', async (req, res) => {
 
         const request_id = crypto.randomUUID();
 
-        console.log({ request_id });
+        log({ request_id });
 
         // Every message sent from the backend to the engine includes:
 
@@ -385,14 +393,14 @@ router.post('/api/exchange/future/order', async (req, res) => {
 
         const parsed_res = await response_promise;
 
-        console.log({ parsed_res });
+        log({ parsed_res });
 
         res.json({ message: 'order placed', data: parsed_res });
 
 
 
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -407,7 +415,7 @@ router.get('/api/exchange/spot/order/:order_id', async (req, res) => {
         const order_id = req.params.order_id;
         const request_id = crypto.randomUUID();
 
-        console.log({ order_id });
+        log({ order_id });
 
         const response_promise = waitForResponse(request_id, 10000);
 
@@ -430,11 +438,11 @@ router.get('/api/exchange/spot/order/:order_id', async (req, res) => {
             return res.status(404).json({ message: 'Order not found' });
         }
 
-        console.log({ parsed_res });
+        log({ parsed_res });
 
         res.json({ message: 'order fetched successfully', data: parsed_res });
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -449,7 +457,7 @@ router.delete('/api/exchange/spot/order/:order_id', async (req, res) => {
         const order_id = req.params.order_id;
         const request_id = crypto.randomUUID();
 
-        console.log({ order_id });
+        log({ order_id });
 
         const response_promise = waitForResponse(request_id, 10000);
 
@@ -472,11 +480,11 @@ router.delete('/api/exchange/spot/order/:order_id', async (req, res) => {
             return res.status(404).json({ message: 'Order not found' });
         }
 
-        console.log({ parsed_res });
+        log({ parsed_res });
 
         res.json({ message: parsed_res.status, data: parsed_res });
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -493,7 +501,7 @@ router.get('/api/exchange/depth/:symbol', async (req, res) => {
         const symbol = req.params.symbol;
         const request_id = crypto.randomUUID();
 
-        console.log({ symbol, request_id });
+        log({ symbol, request_id });
 
         const response_promise = waitForResponse(request_id, DEPTH_RESPONSE_TIMEOUT_MS);
 
@@ -517,11 +525,11 @@ router.get('/api/exchange/depth/:symbol', async (req, res) => {
             return res.status(404).json({ message: 'Depth not available' });
         }
 
-        console.log({ parsed_res });
+        log({ parsed_res });
 
         res.json({ message: 'depth fetched successfully', data: hasDepth(parsed_res) ? parsed_res : (demoDepth || parsed_res) });
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -540,10 +548,10 @@ router.post('/api/exchange/leverage', async (req, res) => {
 
         const leverage = req_body.leverage;
 
-        console.log({ leverage });
+        log({ leverage });
 
         const user_id = req.user;
-        console.log({ user_id });
+        log({ user_id });
 
         const request_id = crypto.randomUUID();
 
@@ -564,11 +572,11 @@ router.post('/api/exchange/leverage', async (req, res) => {
             return res.status(404).json({ message: 'Leverage update not confirmed' });
         }
 
-        console.log({ parsed_res });
+        log({ parsed_res });
 
         res.json({ message: parsed_res.status, data: parsed_res });
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -582,7 +590,7 @@ router.get("/api/exchange/trades/:symbol", async (req, res) => {
         const symbol = req.params.symbol;
         const user = req.user;
 
-        console.log({ symbol });
+        log({ symbol });
 
         const fills = await prisma.fill.findMany({
             where: {
@@ -593,11 +601,11 @@ router.get("/api/exchange/trades/:symbol", async (req, res) => {
             },
             take: 20
         });
-        console.log({ fills });
+        log({ fills });
 
         res.json({ message: "Trades fetched successfully", trades: fills.length ? fills : buildDemoTrades(symbol) })
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -623,14 +631,14 @@ router.get("/api/exchange/orders{/:status}", async (req, res) => {
             }
         });
 
-        console.log({ orders });
+        log({ orders });
 
         const filtered_order = orders.filter(o => o.status == status);
-        console.log({ filtered_order });
+        log({ filtered_order });
 
         res.json({ message: "Orders fetched successfully", orders: status ? filtered_order : orders })
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -657,7 +665,7 @@ router.get("/api/exchange/fills", async (req, res) => {
 
         res.json({ message: "Fill fetched successfully", fills: { buy_fills: buy_fills, sell_fills: sell_fills } })
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -680,7 +688,7 @@ router.get("/api/exchange/positions", async (req, res) => {
             }
         });
 
-        console.log({ positions });
+        log({ positions });
 
         const result = await Promise.all(positions.map(async (p) => {
             const asts = p.market.symbol.split(/_/);
@@ -717,7 +725,7 @@ router.get("/api/exchange/positions", async (req, res) => {
 
         res.json({ message: "Positions fetched successfully", positions: result });
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -740,11 +748,11 @@ router.get("/api/history/funding", async (req, res) => {
             }
         });
 
-        console.log({ funding_fees });
+        log({ funding_fees });
 
         res.json({ message: "Funding fee history fetched successfully", funding_fees });
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
@@ -767,11 +775,11 @@ router.get("/api/history/liquidation", async (req, res) => {
             }
         });
 
-        console.log({ liquidations });
+        log({ liquidations });
 
         res.json({ message: "Liquidation history fetched successfully", liquidations });
     } catch (error) {
-        console.log({ error });
+        log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
             return { key: i.path[0], error: i.message };
         }) : '';
