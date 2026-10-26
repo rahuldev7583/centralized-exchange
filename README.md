@@ -395,3 +395,5 @@ bun run format
 - If balances do not update after fills, run `db-worker`.
 - If mark/index prices are empty, run `oracle-service` and verify `BINANCE_WS_STREAM_URL`.
 - If the web app cannot call the API, verify `NEXT_PUBLIC_API_URL` and `CORS_ORIGINS`.
+
+Test
