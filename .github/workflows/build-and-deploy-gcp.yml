@@ -180,8 +180,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # This script runs on the VM as rahul-dev.
-          # Its arguments are passed separately through SSH.
           REMOTE_SCRIPT="$(cat <<'REMOTE_EOF'
           set -eu
 
@@ -219,10 +217,9 @@ jobs:
           export IMAGE_REGISTRY="$REGISTRY"
           export VERSION="$IMAGE_VERSION"
 
-          echo "Configuring Artifact Registry authentication..."
+          echo "Authenticating Docker to Artifact Registry..."
 
-          # Use the VM's attached Google Cloud identity.
-          # Do not copy GitHub credentials or service-account keys here.
+          # Use the VM's attached service account.
           gcloud auth print-access-token >/dev/null
 
           gcloud auth configure-docker \
@@ -240,27 +237,32 @@ jobs:
 
           chmod 600 .env
 
-          COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml"
+          compose() {
+            docker compose \
+              -f docker-compose.prod.yml \
+              -f docker-compose.postgres.yml \
+              "$@"
+          }
 
           echo "Validating Docker Compose configuration..."
 
-          $COMPOSE config --quiet
+          compose config --quiet
 
           echo "Pulling application images..."
 
-          $COMPOSE pull
+          compose pull
 
           echo "Starting PostgreSQL..."
 
-          $COMPOSE up -d postgres
+          compose up -d postgres
 
           echo "Waiting for PostgreSQL to become healthy..."
 
-          POSTGRES_ID="$($COMPOSE ps -q postgres)"
+          POSTGRES_ID="$(compose ps -q postgres)"
 
           if [ -z "$POSTGRES_ID" ]; then
             echo "PostgreSQL container was not found."
-            $COMPOSE logs --tail=100 postgres
+            compose logs --tail=100 postgres
             exit 1
           fi
 
@@ -288,27 +290,26 @@ jobs:
 
           if [ "$POSTGRES_READY" -ne 1 ]; then
             echo "PostgreSQL did not become healthy."
-            $COMPOSE logs --tail=100 postgres
+            compose logs --tail=100 postgres
             exit 1
           fi
 
           echo "Starting application services..."
 
-          $COMPOSE up -d --remove-orphans
+          compose up -d --remove-orphans
 
           echo "Current container status:"
 
-          $COMPOSE ps
-
+          compose ps
           REMOTE_EOF
           )"
 
-          # Encode the script to avoid nested-heredoc and shell-quoting
-          # problems when transmitting it through gcloud compute ssh.
+          # Encode the remote script to avoid nested SSH heredoc issues.
           REMOTE_SCRIPT_B64="$(
             printf '%s' "$REMOTE_SCRIPT" | base64 -w 0
           )"
 
+          # Safely quote the arguments for the remote Bash process.
           printf -v REMOTE_ARGS '%q ' \
             "$IMAGE_REGISTRY" \
             "$VERSION" \
@@ -332,7 +333,12 @@ jobs:
 
           cd /opt/exchange
 
-          COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml"
+          compose() {
+            docker compose \
+              -f docker-compose.prod.yml \
+              -f docker-compose.postgres.yml \
+              "$@"
+          }
 
           for i in $(seq 1 30); do
             if curl --connect-timeout 3 --max-time 5 -fsS \
@@ -348,8 +354,9 @@ jobs:
           done
 
           echo "Backend health check failed."
-          $COMPOSE ps
-          $COMPOSE logs --tail=100 core-backend
+
+          compose ps
+          compose logs --tail=100 core-backend
 
           exit 1
           HEALTH_EOF
