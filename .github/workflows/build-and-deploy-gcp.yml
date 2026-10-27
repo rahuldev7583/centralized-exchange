@@ -26,19 +26,14 @@ jobs:
         include:
           - app: web
             repository: exchange-web
-
           - app: core-backend
             repository: exchange-core-backend
-
           - app: matching-engine
             repository: exchange-matching-engine
-
           - app: risk-engine
             repository: exchange-risk-engine
-
           - app: db-worker
             repository: exchange-db-worker
-
           - app: oracle-service
             repository: exchange-oracle-service
 
@@ -47,16 +42,17 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate GCP configuration
+        shell: bash
         run: |
           set -euo pipefail
 
           test -n "$GCP_PROJECT_ID" || {
-            echo "::error::GCP_PROJECT_ID is missing from main-deployment variables"
+            echo "::error::GCP_PROJECT_ID is missing"
             exit 1
           }
 
           test -n "$IMAGE_REGISTRY" || {
-            echo "::error::IMAGE_REGISTRY is missing from main-deployment variables"
+            echo "::error::IMAGE_REGISTRY is missing"
             exit 1
           }
 
@@ -71,7 +67,10 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Configure Docker for Artifact Registry
+        shell: bash
         run: |
+          set -euo pipefail
+
           gcloud auth configure-docker \
             "${GCP_REGION}-docker.pkg.dev" \
             --quiet
@@ -81,6 +80,7 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_WS_URL: ${{ vars.NEXT_PUBLIC_WS_URL }}
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -94,12 +94,13 @@ jobs:
             exit 1
           }
 
-      - name: Build application image
+      - name: Build and push application image
         env:
           APP: ${{ matrix.app }}
           IMAGE_NAME: ${{ matrix.repository }}
           NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_WS_URL: ${{ vars.NEXT_PUBLIC_WS_URL }}
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -149,6 +150,7 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Validate deployment configuration
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -174,11 +176,12 @@ jobs:
           echo "Version: $VERSION"
 
       - name: Deploy application
+        shell: bash
         run: |
           set -euo pipefail
 
-          # Pass the values through the SSH command without relying on
-          # environment variables being automatically available remotely.
+          # This script runs on the VM as rahul-dev.
+          # Its arguments are passed separately through SSH.
           REMOTE_SCRIPT="$(cat <<'REMOTE_EOF'
           set -eu
 
@@ -188,33 +191,27 @@ jobs:
 
           echo "Working directory: $(pwd)"
 
-          test -f docker-compose.prod.yml || {
-            echo "Missing docker-compose.prod.yml"
-            exit 1
-          }
-
-          test -f docker-compose.postgres.yml || {
-            echo "Missing docker-compose.postgres.yml"
-            exit 1
-          }
-
-          test -f .env || {
-            echo "Missing /opt/exchange/.env"
-            exit 1
-          }
+          for file in \
+            docker-compose.prod.yml \
+            docker-compose.postgres.yml \
+            .env
+          do
+            if [ ! -f "$file" ]; then
+              echo "Required file is missing: $file"
+              exit 1
+            fi
+          done
 
           test -r .env || {
-            echo "The SSH user cannot read .env"
+            echo "Cannot read /opt/exchange/.env"
             exit 1
           }
 
           test -w .env || {
-            echo "The SSH user cannot write .env"
+            echo "Cannot write /opt/exchange/.env"
             exit 1
           }
 
-          # IMAGE_REGISTRY and VERSION are passed to this script
-          # as positional arguments.
           REGISTRY="$1"
           IMAGE_VERSION="$2"
           REGION="$3"
@@ -222,127 +219,150 @@ jobs:
           export IMAGE_REGISTRY="$REGISTRY"
           export VERSION="$IMAGE_VERSION"
 
-          # Update only the deployment variables; preserve application
-          # configuration such as DATABASE_URL and REDIS_URL.
-          sed -i '/^VERSION=/d; /^IMAGE_REGISTRY=/d' .env
+          echo "Configuring Artifact Registry authentication..."
+
+          # Use the VM's attached Google Cloud identity.
+          # Do not copy GitHub credentials or service-account keys here.
+          gcloud auth print-access-token >/dev/null
+
+          gcloud auth configure-docker \
+            "${REGION}-docker.pkg.dev" \
+            --quiet
+
+          echo "Updating deployment variables..."
+
+          sed -i \
+            '/^VERSION=/d; /^IMAGE_REGISTRY=/d' \
+            .env
 
           printf 'IMAGE_REGISTRY=%s\nVERSION=%s\n' \
             "$REGISTRY" "$IMAGE_VERSION" >> .env
 
           chmod 600 .env
 
+          COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml"
+
           echo "Validating Docker Compose configuration..."
 
-          docker compose \
-            -f docker-compose.prod.yml \
-            -f docker-compose.postgres.yml \
-            config --quiet
+          $COMPOSE config --quiet
 
           echo "Pulling application images..."
 
-          docker compose \
-            -f docker-compose.prod.yml \
-            -f docker-compose.postgres.yml \
-            pull
+          $COMPOSE pull
 
           echo "Starting PostgreSQL..."
 
-          docker compose \
-            -f docker-compose.prod.yml \
-            -f docker-compose.postgres.yml \
-            up -d postgres
+          $COMPOSE up -d postgres
 
           echo "Waiting for PostgreSQL to become healthy..."
+
+          POSTGRES_ID="$($COMPOSE ps -q postgres)"
+
+          if [ -z "$POSTGRES_ID" ]; then
+            echo "PostgreSQL container was not found."
+            $COMPOSE logs --tail=100 postgres
+            exit 1
+          fi
+
+          POSTGRES_READY=0
 
           for i in $(seq 1 30); do
             STATUS="$(docker inspect \
               --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' \
-              "$(docker compose \
-                -f docker-compose.prod.yml \
-                -f docker-compose.postgres.yml \
-                ps -q postgres)")"
+              "$POSTGRES_ID")"
+
+            echo "PostgreSQL status: $STATUS ($i/30)"
 
             if [ "$STATUS" = "healthy" ]; then
-              echo "PostgreSQL is healthy"
+              POSTGRES_READY=1
               break
             fi
 
-            if [ "$i" -eq 30 ]; then
-              echo "PostgreSQL did not become healthy"
-              docker compose \
-                -f docker-compose.prod.yml \
-                -f docker-compose.postgres.yml \
-                logs --tail=100 postgres
-              exit 1
+            if [ "$STATUS" = "exited" ] || [ "$STATUS" = "dead" ]; then
+              echo "PostgreSQL stopped unexpectedly."
+              break
             fi
 
             sleep 2
           done
 
+          if [ "$POSTGRES_READY" -ne 1 ]; then
+            echo "PostgreSQL did not become healthy."
+            $COMPOSE logs --tail=100 postgres
+            exit 1
+          fi
+
           echo "Starting application services..."
 
-          docker compose \
-            -f docker-compose.prod.yml \
-            -f docker-compose.postgres.yml \
-            up -d --remove-orphans
+          $COMPOSE up -d --remove-orphans
 
-          echo "Running containers:"
+          echo "Current container status:"
 
-          docker compose \
-            -f docker-compose.prod.yml \
-            -f docker-compose.postgres.yml \
-            ps
+          $COMPOSE ps
+
           REMOTE_EOF
           )"
 
-          # Pass the script and arguments to the remote shell.
-          # The VM uses its attached service account to access Artifact Registry.
-          printf -v REMOTE_COMMAND '%q ' \
-            bash -s -- \
+          # Encode the script to avoid nested-heredoc and shell-quoting
+          # problems when transmitting it through gcloud compute ssh.
+          REMOTE_SCRIPT_B64="$(
+            printf '%s' "$REMOTE_SCRIPT" | base64 -w 0
+          )"
+
+          printf -v REMOTE_ARGS '%q ' \
             "$IMAGE_REGISTRY" \
             "$VERSION" \
             "$GCP_REGION"
 
-          REMOTE_COMMAND="${REMOTE_COMMAND}${REMOTE_SCRIPT}"
+          echo "Deploying version: $VERSION"
 
           gcloud compute ssh "rahul-dev@$GCP_VM_NAME" \
             --project="$GCP_PROJECT_ID" \
             --zone="$GCP_ZONE" \
             --quiet \
-            --command="bash -s -- $(printf '%q ' "$IMAGE_REGISTRY" "$VERSION" "$GCP_REGION") <<'REMOTE_SCRIPT'
-          $REMOTE_SCRIPT
-          REMOTE_SCRIPT"
+            --command="printf '%s' '$REMOTE_SCRIPT_B64' | base64 -d | bash -s -- $REMOTE_ARGS"
 
       - name: Check backend health
+        shell: bash
         run: |
           set -euo pipefail
 
+          HEALTH_SCRIPT="$(cat <<'HEALTH_EOF'
+          set -eu
+
+          cd /opt/exchange
+
+          COMPOSE="docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml"
+
+          for i in $(seq 1 30); do
+            if curl --connect-timeout 3 --max-time 5 -fsS \
+              http://localhost:5000/api/health
+            then
+              echo
+              echo "Backend is healthy."
+              exit 0
+            fi
+
+            echo "Waiting for backend: $i/30"
+            sleep 5
+          done
+
+          echo "Backend health check failed."
+          $COMPOSE ps
+          $COMPOSE logs --tail=100 core-backend
+
+          exit 1
+          HEALTH_EOF
+          )"
+
+          HEALTH_SCRIPT_B64="$(
+            printf '%s' "$HEALTH_SCRIPT" | base64 -w 0
+          )"
+
+          echo "Checking backend health on the VM..."
+
           gcloud compute ssh "rahul-dev@$GCP_VM_NAME" \
             --project="$GCP_PROJECT_ID" \
             --zone="$GCP_ZONE" \
             --quiet \
-            --command="
-              set -eu
-
-              for i in \$(seq 1 30); do
-                if curl -fsS http://localhost:5000/api/health; then
-                  echo
-                  echo 'Backend is healthy'
-                  exit 0
-                fi
-
-                echo \"Waiting for backend: \$i/30\"
-                sleep 5
-              done
-
-              echo 'Backend health check failed'
-
-              cd /opt/exchange
-
-              docker compose \
-                -f docker-compose.prod.yml \
-                -f docker-compose.postgres.yml \
-                logs --tail=100 core-backend
-
-              exit 1
-            "
+            --command="printf '%s' '$HEALTH_SCRIPT_B64' | base64 -d | bash"
