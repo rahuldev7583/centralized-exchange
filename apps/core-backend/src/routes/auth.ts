@@ -109,10 +109,11 @@ router.post('/api/auth/signin', async (req, res) => {
 
 router.post('/api/auth/admin/signup', async (req, res) => {
     const ADMIN_SECRET = process.env.ADMIN_SECRET_KEY;
-    console.log({ ADMIN_SECRET });
+    //console.log({ ADMIN_SECRET });
 
-    const secret = req.headers.x_secret_key;
-
+    //const secret = req.headers.x_secret_key;
+    const secret = req.get('x-secret-key');
+    
     const admin = req.body;
 
     try {
