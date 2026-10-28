@@ -5,6 +5,7 @@ import { Prisma, prisma } from 'database';
 import { scaledDecimal, toPriceUnits, toQuantityUnits } from 'shared-types';
 import { Order } from '../types/user';
 import { ZodError } from 'zod';
+import { binanceDepth, binanceTrades } from '../utils/binance';
 
 if (!process.env.REDIS_URL) {
     throw new Error('REDIS_URL is not set');
@@ -12,78 +13,12 @@ if (!process.env.REDIS_URL) {
 
 const router = express();
 const DEPTH_RESPONSE_TIMEOUT_MS = Number(process.env.DEPTH_RESPONSE_TIMEOUT_MS || 1200);
-const DEMO_MARKET_DATA_ENABLED = (process.env.DEMO_MARKET_DATA_ENABLED || 'true').toLowerCase() !== 'false';
 
 // Request-path logging is off unless VERBOSE_LOGGING is enabled (ENGINE_CONTRACT.md §6).
 const VERBOSE_LOGGING = process.env.VERBOSE_LOGGING === 'true';
 const log = (...args: unknown[]) => {
     if (VERBOSE_LOGGING) console.log(...args);
 };
-
-const DEMO_MARKETS: Record<string, { price: number; qty: number; step: number }> = {
-    BTC: { price: 65000, qty: 0.018, step: 18 },
-    ETH: { price: 3500, qty: 0.32, step: 1.6 },
-    SOL: { price: 150, qty: 8.5, step: 0.08 },
-};
-
-function demoConfigForSymbol(symbol: string) {
-    const base = symbol.split('_')[0]?.toUpperCase();
-    return base ? DEMO_MARKETS[base] : undefined;
-}
-
-function hasDepth(depth: any) {
-    return Array.isArray(depth?.bids) && depth.bids.length > 0 && Array.isArray(depth?.asks) && depth.asks.length > 0;
-}
-
-function buildDemoDepth(symbol: string) {
-    const cfg = demoConfigForSymbol(symbol);
-    if (!DEMO_MARKET_DATA_ENABLED || !cfg) return null;
-
-    const isPerp = symbol.toUpperCase().includes('PERP');
-    const anchor = cfg.price * (isPerp ? 1.0008 : 1);
-    const bids: Array<{ price: number; size: number }> = [];
-    const asks: Array<{ price: number; size: number }> = [];
-
-    for (let i = 0; i < 24; i++) {
-        const size = Number((cfg.qty * (1 + i * 0.07)).toFixed(8));
-        bids.push({
-            price: Number((anchor - cfg.step * (i + 1)).toFixed(2)),
-            size,
-        });
-        asks.push({
-            price: Number((anchor + cfg.step * (i + 1)).toFixed(2)),
-            size: Number((size * 0.92).toFixed(8)),
-        });
-    }
-
-    return { symbol, bids, asks, timestamp: Date.now(), demo: true };
-}
-
-function buildDemoTrades(symbol: string) {
-    const cfg = demoConfigForSymbol(symbol);
-    if (!DEMO_MARKET_DATA_ENABLED || !cfg) return [];
-
-    const isPerp = symbol.toUpperCase().includes('PERP');
-    const anchor = cfg.price * (isPerp ? 1.0008 : 1);
-    const now = Date.now();
-
-    return Array.from({ length: 20 }, (_, i) => {
-        const side = i % 2 === 0 ? 'buy' : 'sell';
-        const wave = Math.sin(i * 0.85) * cfg.step * 2.4;
-        const direction = side === 'buy' ? cfg.step * 0.35 : -cfg.step * 0.25;
-        return {
-            id: `demo-${symbol}-${i}`,
-            type: 'limit',
-            price: Number((anchor + wave + direction).toFixed(2)),
-            quantity: Number((cfg.qty * (0.35 + (i % 6) * 0.11)).toFixed(8)),
-            symbol,
-            status: 'filled',
-            side,
-            created_at: new Date(now - i * 18_000).toISOString(),
-            updated_at: new Date(now - i * 18_000).toISOString(),
-        };
-    });
-}
 
 async function getBestPrice(symbol: string, side: 'buy' | 'sell'): Promise<number | null> {
     try {
@@ -499,6 +434,9 @@ router.get('/api/exchange/depth/:symbol', async (req, res) => {
     //aggregated orderbook {bids:[[price,size]...], asks:[[price,size]...], timestamp}
     try {
         const symbol = req.params.symbol;
+        if (req.query.demo === 'true') {
+            return res.json({ message: 'demo depth fetched successfully', data: await binanceDepth(symbol) });
+        }
         const request_id = crypto.randomUUID();
 
         log({ symbol, request_id });
@@ -516,18 +454,14 @@ router.get('/api/exchange/depth/:symbol', async (req, res) => {
         );
 
         const parsed_res = await response_promise;
-        const demoDepth = buildDemoDepth(symbol);
 
         if (!parsed_res) {
-            if (demoDepth) {
-                return res.json({ message: 'demo depth fetched successfully', data: demoDepth });
-            }
-            return res.status(404).json({ message: 'Depth not available' });
+            return res.json({ message: 'depth fetched successfully', data: { symbol, bids: [], asks: [], timestamp: Date.now() } });
         }
 
         log({ parsed_res });
 
-        res.json({ message: 'depth fetched successfully', data: hasDepth(parsed_res) ? parsed_res : (demoDepth || parsed_res) });
+        res.json({ message: 'depth fetched successfully', data: parsed_res });
     } catch (error) {
         log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {
@@ -592,6 +526,10 @@ router.get("/api/exchange/trades/:symbol", async (req, res) => {
 
         log({ symbol });
 
+        if (req.query.demo === 'true') {
+            return res.json({ message: "Trades fetched successfully", trades: await binanceTrades(symbol) });
+        }
+
         const fills = await prisma.fill.findMany({
             where: {
                 symbol: symbol,
@@ -603,7 +541,7 @@ router.get("/api/exchange/trades/:symbol", async (req, res) => {
         });
         log({ fills });
 
-        res.json({ message: "Trades fetched successfully", trades: fills.length ? fills : buildDemoTrades(symbol) })
+        res.json({ message: "Trades fetched successfully", trades: fills })
     } catch (error) {
         log({ error });
         const errs = error instanceof ZodError ? error.issues.map((i: any) => {

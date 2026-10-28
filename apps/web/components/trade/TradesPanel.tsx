@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useMarket } from "@/context/MarketContext";
 import { wsClient } from "@/lib/ws";
+import { useDemoTrades } from "@/lib/demo";
 import { formatPrice, formatQuantity, formatClockTime } from "@/lib/format";
 import type { PublicTrade } from "@/lib/types";
 import { emptyState, panel, panelHeader, panelTitle } from "@/lib/ui";
@@ -11,6 +12,7 @@ import { emptyState, panel, panelHeader, panelTitle } from "@/lib/ui";
 export function TradesPanel({ variant = "panel" as const }: { variant?: "panel" | "embedded" }) {
   const { selected } = useMarket();
   const symbol = selected?.symbol;
+  const demo = useDemoTrades();
   const [trades, setTrades] = useState<PublicTrade[]>([]);
 
   const fetchTrades = useCallback(async () => {
@@ -22,7 +24,7 @@ export function TradesPanel({ variant = "panel" as const }: { variant?: "panel" 
     } catch {
       /* trades unavailable */
     }
-  }, [symbol]);
+  }, [symbol, demo]);
 
   useEffect(() => {
     setTrades([]);
@@ -32,7 +34,7 @@ export function TradesPanel({ variant = "panel" as const }: { variant?: "panel" 
 
     const channel = `trades.${symbol}`;
     const unsubscribe = wsClient.subscribe(channel, (data) => {
-      if (!data || typeof data !== "object") return;
+      if (demo || !data || typeof data !== "object") return;
       const d = data as Record<string, unknown>;
       const side = d.side ?? d.order_type;
       const trade: PublicTrade = {
@@ -54,7 +56,7 @@ export function TradesPanel({ variant = "panel" as const }: { variant?: "panel" 
       unsubscribe();
       clearInterval(poll);
     };
-  }, [symbol, fetchTrades]);
+  }, [symbol, demo, fetchTrades]);
 
   const Core = (
     <div className="font-mono text-[13.5px] max-md:text-[12.5px]">

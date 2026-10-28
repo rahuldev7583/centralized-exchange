@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useMarket } from "@/context/MarketContext";
 import { wsClient } from "@/lib/ws";
+import { useDemoTrades } from "@/lib/demo";
 import { formatPrice, formatQuantity } from "@/lib/format";
 import type { DepthEntry } from "@/lib/types";
 import { cx, emptyState, panel, panelHeader, panelTitle } from "@/lib/ui";
@@ -41,6 +42,7 @@ function normalizeLevels(levels: unknown): DepthEntry[] {
 export function Orderbook({ onPriceSelect, rows = 12, variant = "panel" }: Props) {
   const { selected } = useMarket();
   const symbol = selected?.symbol;
+  const demo = useDemoTrades();
   const [bids, setBids] = useState<DepthEntry[]>([]);
   const [asks, setAsks] = useState<DepthEntry[]>([]);
   const [lastPrice, setLastPrice] = useState<number | null>(null);
@@ -61,7 +63,7 @@ export function Orderbook({ onPriceSelect, rows = 12, variant = "panel" }: Props
     } catch {
       /* depth unavailable */
     }
-  }, [symbol, sortBids, sortAsks]);
+  }, [symbol, demo, sortBids, sortAsks]);
 
   useEffect(() => {
     setBids([]);
@@ -72,6 +74,7 @@ export function Orderbook({ onPriceSelect, rows = 12, variant = "panel" }: Props
 
     const channel = `orderbook.${symbol}`;
     const unsubscribe = wsClient.subscribe(channel, (data) => {
+      if (demo) return;
       const d = (data ?? {}) as Record<string, unknown>;
       if (Array.isArray(d.bids)) setBids(sortBids(normalizeLevels(d.bids)));
       if (Array.isArray(d.asks)) setAsks(sortAsks(normalizeLevels(d.asks)));
@@ -84,7 +87,7 @@ export function Orderbook({ onPriceSelect, rows = 12, variant = "panel" }: Props
       unsubscribe();
       clearInterval(poll);
     };
-  }, [symbol, fetchDepth, sortBids, sortAsks]);
+  }, [symbol, demo, fetchDepth, sortBids, sortAsks]);
 
   const { visibleBids, visibleAsks, spread, maxTotal, mid } = useMemo(() => {
     const vb = bids.slice(0, rows);

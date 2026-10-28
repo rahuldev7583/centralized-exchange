@@ -7,6 +7,7 @@ import { prisma } from "database";
 //import { MarketType } from '../../generated/prisma/enums';
 import { MarketType } from 'database';
 import { readableDecimal } from 'shared-types';
+import { binanceCandles } from '../utils/binance';
 
 const router = express();
 
@@ -359,10 +360,17 @@ router.get("/api/market/candles/:symbol", async (req, res) => {
       '30m': 30 * 60 * 1000,
       '1h': 60 * 60 * 1000,
       '1d': 24 * 60 * 60 * 1000,
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000,
     }[interval];
 
     if (!interval_ms) {
       return res.status(404).json({ message: 'Invalid interval' });
+    }
+
+    if (req.query.demo === 'true') {
+      const candles = await binanceCandles(symbol, interval, interval_ms, limit);
+      return res.json({ message: 'Candles fetched successfully', candles });
     }
 
     const to_date = to ? new Date(to) : new Date();

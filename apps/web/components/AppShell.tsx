@@ -9,6 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect } from "react";
 import { btn, cx } from "@/lib/ui";
+import { setDemoTrades, useDemoTrades } from "@/lib/demo";
 
 const MOBILE_NAV_ITEMS = [
   {
@@ -93,6 +94,34 @@ function MobileNav() {
   );
 }
 
+function DemoTradesToggle() {
+  const demo = useDemoTrades();
+  return (
+    <div className="flex items-center gap-2 text-[14px] font-semibold text-text">
+      <span className="max-md:hidden">Demo Trades</span>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={demo}
+        aria-label="Demo Trades"
+        onClick={() => setDemoTrades(!demo)}
+        className={cx(
+          "relative h-[22px] w-[40px] shrink-0 cursor-pointer rounded-full border-none p-0 transition-colors",
+          demo ? "bg-accent" : "bg-border-strong",
+        )}
+      >
+        <span
+          className={cx(
+            "absolute top-[3px] left-[3px] size-4 rounded-full bg-white transition-transform",
+            demo && "translate-x-[18px]",
+          )}
+        />
+      </button>
+      <span className="w-[22px] text-text-dim">{demo ? "On" : "Off"}</span>
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { isAuthed, loading } = useAuth();
   const pathname = usePathname();
@@ -143,6 +172,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
         <div className="ml-auto flex items-center gap-2.5">
+          <DemoTradesToggle />
           <ThemeToggle />
           {isAuthed ? (
             <>

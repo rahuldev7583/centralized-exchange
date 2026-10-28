@@ -1,3 +1,4 @@
+import { isDemoTrades } from "./demo";
 import type {
     AuthResponse,
     BalanceHistoryResponse,
@@ -118,16 +119,16 @@ export const api = {
     },
     candles(symbol: string, interval = "1m", limit = 300) {
         return request<CandlesResponse>(
-            `/api/market/candles/${symbol}?interval=${interval}&limit=${limit}`,
+            `/api/market/candles/${symbol}?interval=${interval}&limit=${limit}&demo=${isDemoTrades()}`,
             { method: "GET" },
             false,
         );
     },
     depth(symbol: string) {
-        return request<DepthResponse>(`/api/exchange/depth/${symbol}`, { method: "GET" });
+        return request<DepthResponse>(`/api/exchange/depth/${symbol}?demo=${isDemoTrades()}`, { method: "GET" });
     },
     trades(symbol: string) {
-        return request<TradesResponse>(`/api/exchange/trades/${symbol}`, { method: "GET" });
+        return request<TradesResponse>(`/api/exchange/trades/${symbol}?demo=${isDemoTrades()}`, { method: "GET" });
     },
 
     placeSpotOrder(params: PlaceOrderParams) {

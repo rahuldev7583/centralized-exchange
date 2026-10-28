@@ -15,10 +15,10 @@ import {
 import { api } from "@/lib/api";
 import { useMarket } from "@/context/MarketContext";
 import { wsClient } from "@/lib/ws";
+import { useDemoTrades } from "@/lib/demo";
 import { centerLoader, cx, panel, panelTitle, spinner, tradePanelHeight } from "@/lib/ui";
 
 const INTERVALS = [
-  { label: "1s", value: "1s", ms: 1_000 },
   { label: "5s", value: "5s", ms: 5_000 },
   { label: "1m", value: "1m", ms: 60_000 },
   { label: "5m", value: "5m", ms: 5 * 60_000 },
@@ -26,7 +26,13 @@ const INTERVALS = [
   { label: "30m", value: "30m", ms: 30 * 60_000 },
   { label: "1h", value: "1h", ms: 60 * 60_000 },
   { label: "1d", value: "1d", ms: 24 * 60 * 60_000 },
+  { label: "7D", value: "7d", ms: 7 * 24 * 60 * 60_000 },
+  { label: "30D", value: "30d", ms: 30 * 24 * 60 * 60_000 },
 ] as const;
+
+const DAY_MS = 24 * 60 * 60_000;
+// Daily and larger candles cover at most the last ~6 months; smaller ones use 300 candles.
+const candleLimit = (ms: number) => (ms >= DAY_MS ? Math.ceil((182 * DAY_MS) / ms) : 300);
 
 type Interval = (typeof INTERVALS)[number]["value"];
 
@@ -39,7 +45,7 @@ interface Candle {
   volume: number;
 }
 
-function formatChartTime(time: unknown, includeSeconds: boolean): string {
+function formatChartTime(time: unknown, includeSeconds: boolean, dateOnly = false): string {
   let d: Date;
   if (typeof time === "number") {
     d = new Date(time * 1000); 
@@ -52,8 +58,7 @@ function formatChartTime(time: unknown, includeSeconds: boolean): string {
   return d.toLocaleString(undefined, {
     month: "short",
     day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+    ...(dateOnly ? { year: "numeric" } : { hour: "2-digit", minute: "2-digit" }),
     ...(includeSeconds ? { second: "2-digit" } : {}),
   });
 }
@@ -69,6 +74,7 @@ export function Chart() {
   const intervalRef = useRef<Interval>("1m");
 
   const symbol = selected?.symbol;
+  const demo = useDemoTrades();
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -96,7 +102,7 @@ export function Chart() {
         secondsVisible: false,
       },
       localization: {
-        timeFormatter: (t: Time) => formatChartTime(t, intervalRef.current.endsWith("s")),
+        timeFormatter: (t: Time) => formatChartTime(t, intervalRef.current.endsWith("s"), intervalRef.current.endsWith("d")),
       },
       autoSize: true,
     });
@@ -149,6 +155,7 @@ export function Chart() {
     chartRef.current?.applyOptions({
       timeScale: {
         secondsVisible: interval.endsWith("s"),
+        timeVisible: !interval.endsWith("d"),
       },
     });
   }, [interval]);
@@ -174,7 +181,8 @@ export function Chart() {
       inFlight = true;
       try {
         const iv = typeof interval === "string" && INTERVALS.some((i) => i.value === interval) ? interval : "1m";
-        const res = await api.candles(symbol, iv, 300);
+        const ms = INTERVALS.find((i) => i.value === iv)?.ms ?? 60_000;
+        const res = await api.candles(symbol, iv, candleLimit(ms));
         if (cancelled) return;
         const timeScale = chartRef.current?.timeScale();
         const visibleRange = hasAutoFit ? timeScale?.getVisibleRange() ?? null : null;
@@ -223,7 +231,7 @@ export function Chart() {
       cancelled = true;
       window.clearInterval(t);
     };
-  }, [symbol, interval]);
+  }, [symbol, interval, demo]);
 
   useEffect(() => {
     if (!symbol) return;
@@ -231,7 +239,7 @@ export function Chart() {
     const channel = `candles.${symbol}`;
     const unsubscribe = wsClient.subscribe(channel, (data) => {
       const d = (data ?? {}) as Record<string, unknown>;
-      if (!d.time) return;
+      if (demo || !d.time) return;
       const t = Math.floor(Number(d.time) / 1000) as UTCTimestamp;
       const close = Number(d.close ?? 0);
       const open = Number(d.open ?? close);
@@ -252,7 +260,7 @@ export function Chart() {
     });
 
     return unsubscribe;
-  }, [symbol]);
+  }, [symbol, demo]);
 
   return (
     <div className={cx(panel, tradePanelHeight, "flex flex-col")}>
