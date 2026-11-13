@@ -131,19 +131,33 @@ for the write to complete and does not apply backpressure on Redis. The
 TypeScript engine uses non-awaited `lPush`; the Rust engine uses a
 writer-thread + channel so the matcher never blocks on Redis I/O.
 
+### Messages per request
+
+Both engines publish exactly this set (counts are part of the parity check):
+
+| Request | Messages |
+| ------- | -------- |
+| `create-order` | 1 response; per fill 1 `settlement-queue` + 1 `matching-to-risk-pub-queue`; if a limit remainder rests, 1 more of each |
+| `cancel-order` | 1 response; if cancelled, 1 `settlement-queue` + 1 `matching-to-risk-pub-queue` |
+| `get-order`, `get-depth` | 1 response |
+| `get-balance` | none |
+
+`cancel-order` and `get-order` take the bare order id as `payload`
+(`{ "payload": "<order_id>" }`). The Rust engine also accepts
+`{ "symbol", "order_id" }`. Unsupported commands are ignored and unknown markets
+get a `rejected` response; neither engine may crash on a malformed request.
+
 ### Side-effect channels
 
-- `settlement-queue` — one message per fill/cancel for `db-worker`.
-- `matching-to-risk-pub-queue` — one message per fill/cancel for `risk-engine`.
+- `settlement-queue` — for `db-worker`.
+- `matching-to-risk-pub-queue` — for `risk-engine`.
 
-These channels are **legacy persistence side-effects and are excluded from the
-engine parity contract**. They are not part of a benchmark comparison. The
-TypeScript engine continues to emit human-decimal numbers on them (so the
-existing `db-worker`/`risk-engine` keep working unchanged); the Rust engine
-emits integer base units. Migrating `db-worker`/`risk-engine` onto the base-unit
-contract is a separate follow-up.
-
----
+The message *counts* above are part of the parity contract. The message
+*formats* are legacy persistence side-effects and are excluded: the TypeScript
+engine continues to emit human-decimal numbers on them (so the existing
+`db-worker`/`risk-engine` keep working unchanged); the Rust engine emits integer
+base units. Migrating `db-worker`/`risk-engine` onto the base-unit contract is a
+separate follow-up.
 
 ## 5. Startup
 
